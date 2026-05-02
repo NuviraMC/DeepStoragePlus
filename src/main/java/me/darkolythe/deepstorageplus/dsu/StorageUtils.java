@@ -19,10 +19,16 @@ import java.util.Locale;
 
 public class StorageUtils {
 
-    /*
-    Check if the item "has no meta" which counts enchants, damage, lore, name, etc.
-    NOTE: item-model alone is NOT considered "meta" for DSU purposes — items that only
-    have a custom item-model (resource pack texture) are treated as plain vanilla items.
+    /**
+     * Returns true if the item has no "meaningful" meta — i.e. it is a plain
+     * vanilla item that the DSU can store.
+     *
+     * Explicitly ignored (NOT considered meaningful meta):
+     *   - item-model / custom-model-data  (resource-pack texture overrides)
+     *   - the internal "Item Count: x" lore added by DSUUpdateManager.createItem()
+     *
+     * Everything else (display name, lore, enchants, damage, potion type, …)
+     * still blocks the item from being stored.
      */
     public static boolean hasNoMeta(ItemStack item) {
         if (ItemList.isPluginItem(item)) {
@@ -56,14 +62,19 @@ public class StorageUtils {
             }
             if (meta.hasLore()) {
                 var lore = meta.getLore();
+                // Allow items whose only lore is the internal DSU display lore
+                // ("Item Count: x") — these are display items that were taken out
+                // of the DSU grid and should be storable again.
                 if (lore != null && !lore.isEmpty() && lore.getFirst().contains("Item Count: ")) {
-                    return item.getEnchantments().isEmpty();
+                    // Only allowed if no enchants either (already checked above).
+                    // item-model presence is irrelevant here.
+                    return true;
                 }
                 return false;
             }
-            // item-model alone (resource pack texture override) is intentionally ignored here.
-            // An item that only has a custom item-model set but no name/lore/enchants
-            // is functionally a plain item and should be storable in the DSU.
+            // item-model alone (e.g. a resource-pack texture set via setItemModel)
+            // is intentionally NOT treated as meaningful meta. An item that only
+            // has an item-model set is functionally a plain vanilla item.
         }
         return true;
     }
@@ -135,7 +146,6 @@ public class StorageUtils {
         if (inv.getType() != InventoryType.CHEST)
             return false;
 
-
         int[] slots = {7, 16, 25, 34, 43, 52};
         boolean isDSU = false;
 
@@ -166,9 +176,7 @@ public class StorageUtils {
     }
 
     /**
-     * Returns the custom name of a chest or double chest, if either side has one. Prefers the left chest.
-     * @param block the block to inspect
-     * @return the custom name if available
+     * Returns the custom name of a chest or double chest, if either side has one.
      */
     public static Optional<String> getChestCustomName(Block block) {
         Chest chest = (Chest) block.getState();
