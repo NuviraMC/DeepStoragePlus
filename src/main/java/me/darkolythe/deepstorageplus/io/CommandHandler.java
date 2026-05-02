@@ -2,6 +2,7 @@ package me.darkolythe.deepstorageplus.io;
 
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
 import me.darkolythe.deepstorageplus.dsu.StorageUtils;
+import me.darkolythe.deepstorageplus.dsu.managers.InviteManager;
 import me.darkolythe.deepstorageplus.dsu.managers.SettingsManager;
 import me.darkolythe.deepstorageplus.utils.ItemList;
 import org.bukkit.Bukkit;
@@ -69,6 +70,48 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
                     items.append(ChatColor.GREEN).append(s).append(ChatColor.BLUE).append(", ");
                 }
                 sender.sendMessage(DeepStoragePlus.prefix + items);
+            } else if (args.length == 2 && args[0].equalsIgnoreCase("invite")) {
+                // /dsp invite <player>
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Only players can use /dsp invite.");
+                    return true;
+                }
+                Player target = Bukkit.getPlayerExact(args[1]);
+                if (target == null) {
+                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Player '" + args[1] + "' is not online.");
+                    return true;
+                }
+                InviteManager.sendInvite(player, target);
+            } else if (args.length == 2 && args[0].equalsIgnoreCase("revoke")) {
+                // /dsp revoke <player> — revoke access for a previously invited player
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Only players can use /dsp revoke.");
+                    return true;
+                }
+                // Try to find by online player first, then by name in access map
+                Player target = Bukkit.getPlayerExact(args[1]);
+                java.util.UUID targetUUID = null;
+                if (target != null) {
+                    targetUUID = target.getUniqueId();
+                } else {
+                    // Search stored access map for a UUID matching the name
+                    for (java.util.UUID uuid : InviteManager.dsuAccess.getOrDefault(player.getUniqueId(), java.util.Collections.emptySet())) {
+                        org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(uuid);
+                        if (args[1].equalsIgnoreCase(op.getName())) {
+                            targetUUID = uuid;
+                            break;
+                        }
+                    }
+                }
+                if (targetUUID == null) {
+                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Could not find '" + args[1] + "' in your invite list.");
+                    return true;
+                }
+                InviteManager.revokeAccess(player.getUniqueId(), targetUUID);
+                sender.sendMessage(DeepStoragePlus.prefix + ChatColor.GREEN + "Access revoked for " + ChatColor.YELLOW + args[1] + ChatColor.GREEN + ".");
+                if (target != null) {
+                    target.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + player.getName() + " has revoked your DSU access.");
+                }
             } else if (args.length >= 2 && args[0].equalsIgnoreCase("give") && (sender instanceof BlockCommandSender || sender.hasPermission("deepstorageplus.give"))) {
                 Optional<Player> player = Bukkit.getServer().getOnlinePlayers().stream().map(x -> (Player) x).filter(x -> x.getName().equalsIgnoreCase(args[1])).findAny();
                 String itemName = null;
@@ -107,9 +150,9 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
                 }
             } else {
                 if (sender.hasPermission("deepstorageplus.admin")) {
-                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Invalid Arguments: /dsp [reload [recipes] | recipes | debugmaterial [item] | debugmodel [item] | debugio | (give <user> item <amt>) | items]");
+                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Invalid Arguments: /dsp [reload [recipes] | recipes | invite <player> | revoke <player> | debugmaterial [item] | debugmodel [item] | debugio | (give <user> item <amt>) | items]");
                 } else if (sender.hasPermission("deepstorageplus.give")) {
-                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Invalid Arguments: /dsp [recipes | (give <user> item <amt>), items]");
+                    sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "Invalid Arguments: /dsp [recipes | invite <player> | revoke <player> | (give <user> item <amt>) | items]");
                 } else {
                     sender.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + "No permissions");
                 }
@@ -302,6 +345,10 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
                 suggestions.add("debugio");
             }
             suggestions.add("recipes");
+            if (sender instanceof Player) {
+                suggestions.add("invite");
+                suggestions.add("revoke");
+            }
             if (sender.hasPermission("deepstorageplus.give")) {
                 suggestions.add("items");
                 suggestions.add("give");
@@ -316,6 +363,16 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
 
         if (args[0].equalsIgnoreCase("reload") && sender.hasPermission("deepstorageplus.admin") && args.length == 2) {
             return filterPrefix(List.of("recipes"), args[1]);
+        }
+
+        // Tab-complete online player names for invite/revoke
+        if ((args[0].equalsIgnoreCase("invite") || args[0].equalsIgnoreCase("revoke"))
+                && sender instanceof Player player && args.length == 2) {
+            List<String> names = Bukkit.getOnlinePlayers().stream()
+                    .map(Player::getName)
+                    .filter(name -> !name.equals(player.getName()))
+                    .toList();
+            return filterPrefix(names, args[1]);
         }
 
         if (!sender.hasPermission("deepstorageplus.give")) {

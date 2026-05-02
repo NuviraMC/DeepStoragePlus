@@ -3,6 +3,7 @@ package me.darkolythe.deepstorageplus;
 import me.darkolythe.deepstorageplus.dsu.listeners.*;
 import me.darkolythe.deepstorageplus.dsu.managers.DSUManager;
 import me.darkolythe.deepstorageplus.dsu.managers.DSUUpdateManager;
+import me.darkolythe.deepstorageplus.dsu.managers.InviteManager;
 import me.darkolythe.deepstorageplus.dsu.managers.SorterManager;
 import me.darkolythe.deepstorageplus.dsu.managers.SorterUpdateManager;
 import me.darkolythe.deepstorageplus.io.CommandHandler;
@@ -58,6 +59,7 @@ public final class DeepStoragePlus extends JavaPlugin {
     private ItemList itemList;
     private RecipeManager recipeManager;
     private RecipeMenuManager recipeMenuManager;
+    private InviteManager inviteManager;
 
     public static int maxTypes = 14;
 
@@ -83,6 +85,7 @@ public final class DeepStoragePlus extends JavaPlugin {
         dsumanager = new DSUManager(plugin);
         sorterUpdateManager = new SorterUpdateManager(plugin);
         sorterManager = new SorterManager(plugin);
+        inviteManager = new InviteManager(plugin);
 
         inventorylistener.addText();
 
@@ -92,6 +95,7 @@ public final class DeepStoragePlus extends JavaPlugin {
         getServer().getPluginManager().registerEvents(iolistener, plugin);
         getServer().getPluginManager().registerEvents(storagebreakslistener, plugin);
         getServer().getPluginManager().registerEvents(recipeMenuManager, plugin);
+        getServer().getPluginManager().registerEvents(inviteManager, plugin);
 
         CommandHandler commandHandler = new CommandHandler(itemList, recipeMenuManager);
         var deepStoragePlusCommand = getCommand("deepstorageplus");
@@ -141,6 +145,8 @@ public final class DeepStoragePlus extends JavaPlugin {
         recentSortCalls.clear();
         sorterLocationCache.clear();
         loadedChunks.clear();
+        InviteManager.pendingInvites.clear();
+        InviteManager.dsuAccess.clear();
     }
 
     public static DeepStoragePlus getInstance() {
