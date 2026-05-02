@@ -5,6 +5,7 @@ import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -119,7 +120,7 @@ public class DSUUpdateManager {
         for (Material m : mats) {
             ItemStack item = new ItemStack(m);
             boolean canAdd = true;
-            for (ItemStack it : inv.getContents()) { //This section adds the items based on the Storage Containers
+            for (ItemStack it : inv.getContents()) {
                 if (item.equals(it)) {
                     canAdd = false;
                     break;
@@ -160,10 +161,36 @@ public class DSUUpdateManager {
         return new ArrayList<>(mats);
     }
 
-    private static ItemStack createItem(Material mat, Inventory inv) {
+    /**
+     * Creates the display item shown in the DSU grid for a given Material.
+     * Preserves the item-model (NamespacedKey) configured for this material so
+     * resource-pack textures survive the display-item round-trip.
+     */
+    static ItemStack createItem(Material mat, Inventory inv) {
         ItemStack item = new ItemStack(mat);
         ItemMeta meta = item.getItemMeta();
         meta.setLore(Arrays.asList(ChatColor.GRAY + "Item Count: " + DSUManager.getTotalMaterialAmount(inv, mat)));
+
+        // Apply configured item-model so the display item keeps its resource-pack texture.
+        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
+        if (plugin != null) {
+            String materialKey = mat.getKey().getKey(); // e.g. "stone", "iron_ingot"
+            // Check all known item-ids to see if any map to this material + have an item-model configured.
+            for (String itemId : plugin.getItemList().itemListMap.keySet()) {
+                ItemStack registered = plugin.getItemList().itemListMap.get(itemId);
+                if (registered != null && registered.getType() == mat) {
+                    String configuredModel = plugin.getConfig().getString("items." + itemId + ".item-model");
+                    if (configuredModel != null && !configuredModel.isBlank() && !configuredModel.equalsIgnoreCase("none")) {
+                        NamespacedKey modelKey = NamespacedKey.fromString(configuredModel, plugin);
+                        if (modelKey != null) {
+                            meta.setItemModel(modelKey);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
         item.setItemMeta(meta);
         return item;
     }
