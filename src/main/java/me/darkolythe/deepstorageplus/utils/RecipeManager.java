@@ -1,79 +1,210 @@
 package me.darkolythe.deepstorageplus.utils;
 
-import me.darkolythe.customrecipeapi.APIManager;
-import me.darkolythe.customrecipeapi.CustomRecipeAPI;
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
-import org.bukkit.inventory.meta.ItemMeta;
+
+import java.io.File;
+import java.util.*;
 
 public class RecipeManager {
 
-    private DeepStoragePlus main;
-    private ItemList itemList;
+    private final DeepStoragePlus main;
+    private final ItemList itemList;
+    private final File recipesFile;
+    private final List<String> registeredRecipeKeys = new ArrayList<>();
+    private final Map<String, RecipeDefinition> loadedRecipes = new LinkedHashMap<>();
 
     public RecipeManager(DeepStoragePlus plugin, ItemList itemList) {
-        this.main = plugin; // set it equal to an instance of main
+        this.main = plugin;
         this.itemList = itemList;
+        this.recipesFile = new File(main.getDataFolder(), "recipes.yml");
+        ensureRecipesFile();
+        reloadRecipes();
+    }
 
-        if (APIManager.getWorkbench() == null) {
-            createWorkbench();
+    public void reloadRecipes() {
+        for (String key : registeredRecipeKeys) {
+            Bukkit.removeRecipe(new NamespacedKey(main, key));
         }
-        createStorages();
+        registeredRecipeKeys.clear();
+        loadedRecipes.clear();
+
+        loadedRecipes.putAll(loadConfiguredRecipes());
+        for (RecipeDefinition definition : loadedRecipes.values()) {
+            registerRecipe(definition.key(), definition.result(), definition.rows()[0], definition.rows()[1], definition.rows()[2], definition.choices());
+        }
+
+        main.getLogger().info("Loaded " + loadedRecipes.size() + " recipes from recipes.yml");
     }
 
-    private void createWorkbench() {
-        ItemStack workbenchItem = new ItemStack(Material.DISPENSER);
-        ItemMeta meta = workbenchItem.getItemMeta();
-        meta.setDisplayName(ChatColor.YELLOW.toString() + ChatColor.BOLD.toString() + LanguageManager.getValue("specialcrafting"));
-        workbenchItem.setItemMeta(meta);
-        ShapedRecipe workbenchRecipe = new ShapedRecipe(new NamespacedKey(main, "Workbench"), workbenchItem);
-        workbenchRecipe.shape("IGI", "GDG", "IGI");
-        workbenchRecipe.setIngredient('I', Material.IRON_BLOCK);
-        workbenchRecipe.setIngredient('G', Material.GLASS);
-        workbenchRecipe.setIngredient('D', Material.DIAMOND_BLOCK);
-        Bukkit.getServer().addRecipe(workbenchRecipe);
-
-        APIManager.setWorkBench(workbenchRecipe);
+    public List<RecipeDefinition> getRecipesByCategory(String category) {
+        List<RecipeDefinition> result = new ArrayList<>();
+        for (RecipeDefinition definition : loadedRecipes.values()) {
+            if (definition.category().equalsIgnoreCase(category)) {
+                result.add(definition);
+            }
+        }
+        return result;
     }
 
-    private void createStorages() {
-        ItemStack redstone = new ItemStack(Material.REDSTONE);
-        ItemStack quartz = new ItemStack(Material.QUARTZ);
-        ItemStack gold = new ItemStack(Material.GOLD_INGOT);
-        ItemStack iron = new ItemStack(Material.IRON_INGOT);
-        ItemStack glass = new ItemStack(Material.GLASS);
-        ItemStack glowstone = new ItemStack(Material.GLOWSTONE_DUST);
-        ItemStack diamond = new ItemStack(Material.DIAMOND);
-        ItemStack emerald = new ItemStack(Material.EMERALD);
-        ItemStack air = new ItemStack(Material.AIR);
-        ItemStack diamondblock = new ItemStack(Material.DIAMOND_BLOCK);
-        ItemStack redstoneblock = new ItemStack(Material.REDSTONE_BLOCK, 32);
-        ItemStack endereye = new ItemStack(Material.ENDER_EYE);
+    private void ensureRecipesFile() {
+        if (!recipesFile.exists()) {
+            main.saveResource("recipes.yml", false);
+        }
+    }
 
-        CustomRecipeAPI.createRecipe(itemList.storageCell1K, redstone, quartz, redstone, quartz, gold, quartz, redstone, quartz, redstone);
-        CustomRecipeAPI.createRecipe(itemList.storageCell4K, redstone, iron, redstone, itemList.storageCell1K, glass, itemList.storageCell1K, redstone, itemList.storageCell1K, redstone);
-        CustomRecipeAPI.createRecipe(itemList.storageCell16K, glowstone, diamond, glowstone, itemList.storageCell4K, glass, itemList.storageCell4K, glowstone, itemList.storageCell4K, glowstone);
-        CustomRecipeAPI.createRecipe(itemList.storageCell64K, glowstone, diamond, glowstone, itemList.storageCell16K, glass, itemList.storageCell16K, glowstone, itemList.storageCell16K, glowstone);
-        CustomRecipeAPI.createRecipe(itemList.storageCell256K, emerald, diamond, emerald, itemList.storageCell64K, glass, itemList.storageCell64K, emerald, itemList.storageCell64K, emerald);
-        CustomRecipeAPI.createRecipe(itemList.storageCell1M, emerald, diamond, emerald, itemList.storageCell256K, glass, itemList.storageCell256K, emerald, itemList.storageCell256K, emerald);
+    private Map<String, RecipeDefinition> loadConfiguredRecipes() {
+        Map<String, RecipeDefinition> recipes = new LinkedHashMap<>();
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(recipesFile);
+        ConfigurationSection root = yaml.getConfigurationSection("recipes");
+        if (root == null) {
+            main.getLogger().warning("recipes.yml is missing 'recipes:' root section.");
+            return recipes;
+        }
 
-        CustomRecipeAPI.createRecipe(itemList.storageContainer1K, glass, redstone, glass, redstone, itemList.storageCell1K, redstone, iron, iron, iron);
-        CustomRecipeAPI.createRecipe(itemList.storageContainer4K, glass, redstone, glass, redstone, itemList.storageCell4K, redstone, iron, iron, iron);
-        CustomRecipeAPI.createRecipe(itemList.storageContainer16K, glass, redstone, glass, redstone, itemList.storageCell16K, redstone, gold, gold, gold);
-        CustomRecipeAPI.createRecipe(itemList.storageContainer64K, glass, redstone, glass, redstone, itemList.storageCell64K, redstone, gold, gold, gold);
-        CustomRecipeAPI.createRecipe(itemList.storageContainer256K, glass, redstone, glass, redstone, itemList.storageCell256K, redstone, diamond, diamond, diamond);
-        CustomRecipeAPI.createRecipe(itemList.storageContainer1M, glass, redstone, glass, redstone, itemList.storageCell1M, redstone, diamond, diamond, diamond);
+        for (String key : root.getKeys(false)) {
+            ConfigurationSection section = root.getConfigurationSection(key);
+            if (section == null) {
+                continue;
+            }
 
-        CustomRecipeAPI.createRecipe(itemList.sorterWrench, iron, air, iron, air, gold, air, iron, air, iron);
-        CustomRecipeAPI.createRecipe(itemList.storageWrench, iron, air, iron, air, quartz, air, iron, air, iron);
-        CustomRecipeAPI.createRecipe(itemList.linkModule, redstone, quartz, redstone, diamond, gold, diamond, redstone, quartz, redstone);
-        CustomRecipeAPI.createRecipe(itemList.receiver, air, endereye, air, air, quartz, air, iron, diamond, iron);
-        CustomRecipeAPI.createRecipe(itemList.terminal, air, itemList.receiver, air, redstoneblock, diamondblock, redstoneblock, diamond, quartz, diamond);
-        CustomRecipeAPI.createRecipe(itemList.speedUpgrade, redstone, redstone, redstone, redstone, diamond, redstone, redstone, redstone, redstone);
+            String category = section.getString("category", "tools").toLowerCase(Locale.ROOT);
+            String resultToken = section.getString("result");
+            ItemStack result = resolveItemToken(resultToken);
+            if (result == null) {
+                main.getLogger().warning("Skipping recipe '" + key + "': invalid result '" + resultToken + "'.");
+                continue;
+            }
+
+            String[] rows = normalizeShape(section.getStringList("shape"));
+            ConfigurationSection ingredientsSection = section.getConfigurationSection("ingredients");
+            if (ingredientsSection == null) {
+                main.getLogger().warning("Skipping recipe '" + key + "': missing ingredients.");
+                continue;
+            }
+
+            Map<Character, RecipeChoice> choices = new HashMap<>();
+            Map<Character, ItemStack> ingredientItems = new HashMap<>();
+            boolean invalidIngredient = false;
+            for (String symbolKey : ingredientsSection.getKeys(false)) {
+                if (symbolKey.length() != 1) {
+                    main.getLogger().warning("Skipping ingredient in recipe '" + key + "': symbol must be one character.");
+                    invalidIngredient = true;
+                    break;
+                }
+                char symbol = symbolKey.charAt(0);
+                String ingredientToken = ingredientsSection.getString(symbolKey);
+                ItemStack ingredientItem = resolveItemToken(ingredientToken);
+                RecipeChoice choice = resolveChoiceToken(ingredientToken);
+                if (ingredientItem == null || choice == null) {
+                    main.getLogger().warning("Skipping recipe '" + key + "': invalid ingredient '" + symbolKey + "'='" + ingredientToken + "'.");
+                    invalidIngredient = true;
+                    break;
+                }
+                ingredientItems.put(symbol, ingredientItem);
+                choices.put(symbol, choice);
+            }
+
+            if (invalidIngredient) {
+                continue;
+            }
+
+            recipes.put(key, new RecipeDefinition(key, category, result, rows, ingredientItems, choices));
+        }
+
+        return recipes;
+    }
+
+    private String[] normalizeShape(List<String> shape) {
+        String[] rows = new String[]{"   ", "   ", "   "};
+        for (int i = 0; i < 3; i++) {
+            if (shape != null && i < shape.size() && shape.get(i) != null) {
+                String row = shape.get(i);
+                rows[i] = row.length() >= 3 ? row.substring(0, 3) : String.format("%-3s", row);
+            }
+        }
+        return rows;
+    }
+
+    private ItemStack resolveItemToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+
+        String normalized = token.trim();
+        if (normalized.toLowerCase(Locale.ROOT).startsWith("item:")) {
+            normalized = normalized.substring(5);
+        }
+
+        Optional<ItemStack> pluginItem = itemList.getItem(normalized);
+        if (pluginItem.isPresent()) {
+            return pluginItem.get().clone();
+        }
+
+        Material material = ItemList.parseConfiguredMaterial(normalized);
+        if (material == null || material == Material.AIR) {
+            return null;
+        }
+        return new ItemStack(material);
+    }
+
+    private RecipeChoice resolveChoiceToken(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+
+        String normalized = token.trim();
+        boolean forcePluginItem = normalized.toLowerCase(Locale.ROOT).startsWith("item:");
+        if (forcePluginItem) {
+            normalized = normalized.substring(5);
+        }
+
+        Optional<ItemStack> pluginItem = itemList.getItem(normalized);
+        if (pluginItem.isPresent()) {
+            return exact(pluginItem.get());
+        }
+
+        if (forcePluginItem) {
+            return null;
+        }
+
+        Material material = ItemList.parseConfiguredMaterial(normalized);
+        if (material == null || material == Material.AIR) {
+            return null;
+        }
+
+        return new RecipeChoice.MaterialChoice(material);
+    }
+
+    private void registerRecipe(String key, ItemStack result, String row1, String row2, String row3, Map<Character, RecipeChoice> ingredients) {
+        ShapedRecipe recipe = new ShapedRecipe(new NamespacedKey(main, key), result.clone());
+        recipe.shape(row1, row2, row3);
+        for (Map.Entry<Character, RecipeChoice> entry : ingredients.entrySet()) {
+            recipe.setIngredient(entry.getKey(), entry.getValue());
+        }
+        Bukkit.getServer().addRecipe(recipe);
+        registeredRecipeKeys.add(key);
+    }
+
+
+    private static RecipeChoice exact(ItemStack item) {
+        return new RecipeChoice.ExactChoice(item.clone());
+    }
+
+    public record RecipeDefinition(
+            String key,
+            String category,
+            ItemStack result,
+            String[] rows,
+            Map<Character, ItemStack> ingredientItems,
+            Map<Character, RecipeChoice> choices
+    ) {
     }
 }

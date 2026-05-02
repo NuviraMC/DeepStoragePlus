@@ -86,7 +86,7 @@ public class StorageBreakListener implements Listener {
         for (int i = 0; i < chest.getInventory().getContents().length; i++) {
             ItemStack item = chest.getInventory().getItem(i);
             if (item != null) {
-                if (!(item.hasItemMeta() && (item.getType() == Material.STONE_AXE))) {
+                if (!ItemList.isPluginItem(item)) {
                     chest.getInventory().setItem(i, null);
                 } else {
                     chest.getWorld().dropItemNaturally(chest.getLocation(), item);

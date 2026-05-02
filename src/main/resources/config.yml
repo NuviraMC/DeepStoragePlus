@@ -1,9 +1,73 @@
-loadresourcepack: true
-resourcepackmessage: true
-prefix: "&f&l[&9&lDeepStoragePlus&f&l]"
+loadresourcepack: false
+resourcepackmessage: false
+prefix: "&b&lNUVIRAMC &8» &7"
 range: 500
 # range is used for the maximum distance a player can be from the DSU to use the wireless terminal.
   # Set to -1 for no max distance.
+
+items:
+  storage_cell_1k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_cell_4k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_cell_16k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_cell_64k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_cell_256k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_cell_1m:
+    material: STONE_AXE
+    item-model: NONE
+  storage_container_1k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_container_4k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_container_16k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_container_64k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_container_256k:
+    material: STONE_AXE
+    item-model: NONE
+  storage_container_1m:
+    material: STONE_AXE
+    item-model: NONE
+  creative_storage_container:
+    material: STONE_AXE
+    item-model: NONE
+  storage_wrench:
+    material: STONE_AXE
+    item-model: NONE
+  sorter_wrench:
+    material: STONE_AXE
+    item-model: NONE
+  link_module:
+    material: STONE_AXE
+    item-model: NONE
+  receiver:
+    material: STONE_AXE
+    item-model: NONE
+  terminal:
+    material: STONE_AXE
+    item-model: NONE
+  speed_upgrade:
+    material: GLOWSTONE_DUST
+  dsu_io_settings:
+    material: REDSTONE
+    item-model: NONE
+  dsu_lock:
+    material: TRIPWIRE_HOOK
+    item-model: NONE
 
 all: "all"
 alpha: "alpha"
@@ -83,9 +147,95 @@ world: "World"
 # Max Storage Sizes (in kilobytes)
 # These settings determine the size of containers at the time of crafting, not retroactively
 countinstacks: false # Max items counted in stacks rather than by single items
+container-max-types: 14 # Type slots per storage container (7*2 default)
 1kmax: 1
 4kmax: 4
 16kmax: 16
 64kmax: 64
 256kmax: 256
 1mmax: 1024
+
+# IO speed upgrade behavior
+io-speed:
+  max-level: 63
+
+# Recipe GUI layout
+recipe-menu:
+  filler:
+    material: GRAY_STAINED_GLASS_PANE
+    name: "&8 "
+  main:
+    size: 27
+    categories:
+      cells:
+        slot: 10
+        material: COMPARATOR
+        lore: "&7Open category"
+      containers:
+        slot: 12
+        material: CHEST
+        lore: "&7Open category"
+      tools:
+        slot: 14
+        material: BLAZE_ROD
+        lore: "&7Open category"
+      wireless:
+        slot: 16
+        material: REDSTONE
+        lore: "&7Open category"
+  category:
+    size: 54
+    recipe-slots: [10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43]
+    back-slot: 49
+    back-material: ARROW
+    prev-slot: 45
+    prev-material: SPECTRAL_ARROW
+    next-slot: 53
+    next-material: ARROW
+  detail:
+    size: 54
+    grid-slots: [10, 11, 12, 19, 20, 21, 28, 29, 30]
+    result-slot: 24
+    info-slot: 15
+    back-slot: 49
+    back-material: ARROW
+
+# Recipe GUI language keys
+recipe_menu_main_title: "&3DSP Recipes"
+recipe_menu_category_title: "&3DSP Recipes: %category%"
+recipe_menu_detail_title: "&3Recipe: %recipe%"
+recipe_menu_category_prefix: "&3DSP Recipes:"
+recipe_menu_detail_prefix: "&3Recipe:"
+recipe_menu_back_button: "&eBack"
+recipe_menu_back_lore: "&7Return to categories"
+recipe_menu_prev_button: "&ePrevious Page"
+recipe_menu_prev_lore: "&7Go to previous page"
+recipe_menu_next_button: "&eNext Page"
+recipe_menu_next_lore: "&7Go to next page"
+recipe_menu_detail_back_lore: "&7Return to recipe list"
+recipe_menu_detail_info_title: "&bRecipe Details"
+recipe_menu_pattern_label: "&7Pattern:"
+recipe_menu_ingredients_label: "&7Ingredients:"
+recipe_menu_open_detail: "&eClick for detailed view"
+recipe_menu_category_cells: "&bStorage Cells"
+recipe_menu_category_containers: "&aStorage Containers"
+recipe_menu_category_tools: "&6Tools"
+recipe_menu_category_wireless: "&dWireless + Upgrades"
+recipe_menu_legend_redstone: "Redstone"
+recipe_menu_legend_quartz: "Quartz"
+recipe_menu_legend_gold: "Gold Ingot"
+recipe_menu_legend_iron: "Iron Ingot"
+recipe_menu_legend_glass: "Glass"
+recipe_menu_legend_glowstone: "Glowstone Dust"
+recipe_menu_legend_diamond: "Diamond"
+recipe_menu_legend_emerald: "Emerald"
+recipe_menu_legend_ender_eye: "Ender Eye"
+recipe_menu_legend_redstone_block: "Redstone Block"
+recipe_menu_legend_diamond_block: "Diamond Block"
+recipe_menu_legend_receiver: "Receiver"
+recipe_menu_legend_cell_1k: "1K Cell"
+recipe_menu_legend_cell_4k: "4K Cell"
+recipe_menu_legend_cell_16k: "16K Cell"
+recipe_menu_legend_cell_64k: "64K Cell"
+recipe_menu_legend_cell_256k: "256K Cell"
+recipe_menu_legend_cell_1m: "1M Cell"

@@ -1,10 +1,11 @@
 package me.darkolythe.deepstorageplus.dsu.managers;
 
-import de.tr7zw.changeme.nbtapi.NBTItem;
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
+import me.darkolythe.deepstorageplus.utils.ItemList;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemFlag;
@@ -50,15 +51,13 @@ public class DSUManager {
 
         ItemStack IOItem = inv.getItem(53);
         if (IOItem == null
-                || !IOItem.hasItemMeta()
-                || !IOItem.getItemMeta().hasDisplayName()
-                || !IOItem.getItemMeta().getDisplayName().equals(ChatColor.WHITE + LanguageManager.getValue("dsuioconfig"))) {
+                || !ItemList.isItem(IOItem, ItemList.KEY_IO_SETTINGS)) {
             inv.setItem(53, createIOItem(player));
         }
     }
 
     public static ItemStack createIOItem(Player player) {
-        ItemStack settings = new ItemStack(Material.REDSTONE);
+        ItemStack settings = new ItemStack(ItemList.resolveItemMaterial(ItemList.KEY_IO_SETTINGS, Material.REDSTONE));
         ItemMeta settingsmeta = settings.getItemMeta();
         settingsmeta.setDisplayName(ChatColor.WHITE + ChatColor.stripColor(LanguageManager.getValue("dsuioconfig")));
         settingsmeta.setLore(Arrays.asList(ChatColor.GRAY + LanguageManager.getValue("input") + ": " + ChatColor.BLUE + LanguageManager.getValue("all"),
@@ -67,14 +66,16 @@ public class DSUManager {
                 ChatColor.GRAY + LanguageManager.getValue("owner") + ": " + ChatColor.BLUE + player.getName(),
                 ChatColor.RED + LanguageManager.getValue("locked")));
 
-        // set texture data ID
-        settingsmeta.setCustomModelData(13003);
+        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
+        String configuredModel = plugin.getConfig().getString("items." + ItemList.KEY_IO_SETTINGS + ".item-model");
+        ItemList.applyConfiguredItemModel(settingsmeta, configuredModel, plugin);
+        settingsmeta.setUnbreakable(true);
+        settingsmeta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_UNBREAKABLE);
+        settingsmeta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item_id"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.KEY_IO_SETTINGS);
+        settingsmeta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
+        settingsmeta.getPersistentDataContainer().set(new NamespacedKey(plugin, "dsu_owner_uuid"), org.bukkit.persistence.PersistentDataType.STRING, player.getUniqueId().toString());
 
         settings.setItemMeta(settingsmeta);
-
-        NBTItem nbt = new NBTItem(settings);
-        nbt.setString("dsu_owner_uuid", player.getUniqueId().toString());
-        settings = nbt.getItem();
 
         return settings;
     }
@@ -90,6 +91,9 @@ public class DSUManager {
         ItemStack border = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta bordermeta = border.getItemMeta();
         bordermeta.setDisplayName(ChatColor.DARK_GRAY + LanguageManager.getValue("dsuwalls"));
+        bordermeta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        bordermeta.getPersistentDataContainer().set(new NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.KEY_DSU_WALL);
+        bordermeta.getPersistentDataContainer().set(new NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
         border.setItemMeta(bordermeta);
 
         return dsuWall = border;
@@ -102,6 +106,8 @@ public class DSUManager {
         ItemStack storage = new ItemStack(Material.WHITE_STAINED_GLASS_PANE);
         ItemMeta storagemeta = storage.getItemMeta();
         storagemeta.setDisplayName(ChatColor.YELLOW + LanguageManager.getValue("emptystorageblock"));
+        storagemeta.getPersistentDataContainer().set(new NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.KEY_DSU_EMPTY_BLOCK);
+        storagemeta.getPersistentDataContainer().set(new NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
         storage.setItemMeta(storagemeta);
 
         return storage;
@@ -219,7 +225,7 @@ public class DSUManager {
     Update the container with the itemstack being added
      */
     public static void addDataToContainer(ItemStack container, ItemStack item) {
-        if (container.hasItemMeta() && container.getItemMeta().hasDisplayName() && container.getItemMeta().getDisplayName().contains(LanguageManager.getValue("storagecontainer"))) {
+        if (ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
             Material mat = item.getType();
             int amount = item.getAmount();
 
@@ -322,7 +328,8 @@ public class DSUManager {
         Material mat = item.getType();
         ItemMeta meta = container.getItemMeta();
         List<String> lore = meta.getLore();
-        for (int i = 2; i < DeepStoragePlus.maxTypes + 2; i++) {
+        int slots = getTypeSlotCount(lore);
+        for (int i = 2; i < 2 + slots && i < lore.size(); i++) {
             if (lore.get(i).contains(LanguageManager.getValue("empty"))) { //find the first empty material type and update it to the new material
                 int curStorage = countStorage(container, LanguageManager.getValue("currentstorage") + ": ");
                 lore.set(i, ChatColor.WHITE.toString() + " - " + matToString(mat) + " " + Math.min(item.getAmount(), curStorage));
@@ -339,7 +346,8 @@ public class DSUManager {
     private static void editContainerTypeAmount(ItemStack container, Material mat, int amt) {
         ItemMeta meta = container.getItemMeta();
         List<String> lore = meta.getLore();
-        for (int i = 2; i < DeepStoragePlus.maxTypes + 2; i++) {
+        int slots = getTypeSlotCount(lore);
+        for (int i = 2; i < 2 + slots && i < lore.size(); i++) {
             String cleanLore = lore.get(i).replace(ChatColor.WHITE.toString(), "").replace(" - ", "");
             if (!lore.get(i).contains(" - " + LanguageManager.getValue("empty")) && cleanLore.equals(matToString(mat) + " " + getMaterialAmount(lore.get(i)))) {
                 String loreStr = lore.get(i);
@@ -393,7 +401,7 @@ public class DSUManager {
         LinkedHashSet<Material> list = new LinkedHashSet<>();
         for (int i = 0; i < 5; i++) {
             ItemStack container = dsu.getItem(8 + (9 * i));
-            if (container != null && container.getItemMeta() != null && container.getItemMeta().getDisplayName().contains(LanguageManager.getValue("storagecontainer"))) {
+            if (ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
                 HashSet<Material> mats = DSUManager.getTypes(container.getItemMeta().getLore());
                 list.addAll(mats);
             }
@@ -404,7 +412,7 @@ public class DSUManager {
     public static boolean dsuContainsType(Inventory dsu, Material material) {
         for (int i = 0; i < 5; i++) {
             ItemStack container = dsu.getItem(8 + (9 * i));
-            if (container != null && container.getItemMeta() != null && container.getItemMeta().getDisplayName().contains(LanguageManager.getValue("storagecontainer"))) {
+            if (ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
                 HashSet<Material> mats = DSUManager.getTypes(container.getItemMeta().getLore());
                 if (mats.contains(material)) {
                     return true;
@@ -424,8 +432,10 @@ public class DSUManager {
             if (mat != null) {
                 if (amount != amt) {
                     ItemStack container = inv.getItem(8 + (9 * i));
-                    if (container.hasItemMeta() && container.getItemMeta().hasDisplayName() && container.getItemMeta().getDisplayName().contains(LanguageManager.getValue("storagecontainer"))) {
-                        for (int x = 2; x < DeepStoragePlus.maxTypes + 2; x++) {
+                    if (ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
+                        List<String> lore = container.getItemMeta() != null ? container.getItemMeta().getLore() : null;
+                        int slots = getTypeSlotCount(lore);
+                        for (int x = 2; x < 2 + slots && lore != null && x < lore.size(); x++) {
                             if (getType(container.getItemMeta().getLore().get(x)) == mat) {
                                 amount = Math.min(amount + getMaterialAmount(container.getItemMeta().getLore().get(x)), amt);
                                 editContainerTypeAmount(container, mat, -Math.min(getMaterialAmount(container.getItemMeta().getLore().get(x)), amt - amountTaken));
@@ -441,5 +451,22 @@ public class DSUManager {
             }
         }
         return amount;
+    }
+
+    private static int getTypeSlotCount(List<String> lore) {
+        if (lore == null || lore.size() < 2) {
+            return DeepStoragePlus.maxTypes;
+        }
+
+        int maxFromLore = DeepStoragePlus.maxTypes;
+        try {
+            String data = getData(lore.get(1));
+            maxFromLore = getMaxData(data);
+        } catch (Exception ignored) {
+            // Fallback to configured default when parsing legacy/invalid lore.
+        }
+
+        int availableLines = Math.max(0, lore.size() - 2);
+        return Math.min(Math.max(1, maxFromLore), availableLines);
     }
 }

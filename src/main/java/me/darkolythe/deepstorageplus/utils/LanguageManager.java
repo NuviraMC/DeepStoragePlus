@@ -10,6 +10,7 @@ public class LanguageManager {
     private static Map<String, String> translateMap = new HashMap<>();
 
     public static void setup(DeepStoragePlus main) {
+        translateMap.clear();
         translateMap.put("faileddownload", main.getConfig().getString("faileddownload"));
         translateMap.put("downloadhere", main.getConfig().getString("downloadhere"));
         translateMap.put("containersfull", main.getConfig().getString("containersfull"));
@@ -84,6 +85,48 @@ public class LanguageManager {
         translateMap.put("givecommand", main.getConfig().getString("givecommand"));
         translateMap.put("emptysorterblock", main.getConfig().getString("emptysorterblock"));
         translateMap.put("nowirelesspermission", main.getConfig().getString("nowirelesspermission"));
+
+        // Recipe menu texts
+        translateMap.put("recipe_menu_main_title", main.getConfig().getString("recipe_menu_main_title"));
+        translateMap.put("recipe_menu_category_title", main.getConfig().getString("recipe_menu_category_title"));
+        translateMap.put("recipe_menu_detail_title", main.getConfig().getString("recipe_menu_detail_title"));
+        translateMap.put("recipe_menu_category_prefix", main.getConfig().getString("recipe_menu_category_prefix"));
+        translateMap.put("recipe_menu_detail_prefix", main.getConfig().getString("recipe_menu_detail_prefix"));
+        translateMap.put("recipe_menu_back_button", main.getConfig().getString("recipe_menu_back_button"));
+        translateMap.put("recipe_menu_back_lore", main.getConfig().getString("recipe_menu_back_lore"));
+        translateMap.put("recipe_menu_prev_button", main.getConfig().getString("recipe_menu_prev_button"));
+        translateMap.put("recipe_menu_prev_lore", main.getConfig().getString("recipe_menu_prev_lore"));
+        translateMap.put("recipe_menu_next_button", main.getConfig().getString("recipe_menu_next_button"));
+        translateMap.put("recipe_menu_next_lore", main.getConfig().getString("recipe_menu_next_lore"));
+        translateMap.put("recipe_menu_detail_back_lore", main.getConfig().getString("recipe_menu_detail_back_lore"));
+        translateMap.put("recipe_menu_detail_info_title", main.getConfig().getString("recipe_menu_detail_info_title"));
+        translateMap.put("recipe_menu_pattern_label", main.getConfig().getString("recipe_menu_pattern_label"));
+        translateMap.put("recipe_menu_ingredients_label", main.getConfig().getString("recipe_menu_ingredients_label"));
+        translateMap.put("recipe_menu_open_detail", main.getConfig().getString("recipe_menu_open_detail"));
+        translateMap.put("recipe_menu_category_cells", main.getConfig().getString("recipe_menu_category_cells"));
+        translateMap.put("recipe_menu_category_containers", main.getConfig().getString("recipe_menu_category_containers"));
+        translateMap.put("recipe_menu_category_tools", main.getConfig().getString("recipe_menu_category_tools"));
+        translateMap.put("recipe_menu_category_wireless", main.getConfig().getString("recipe_menu_category_wireless"));
+
+        // Recipe ingredient legends
+        translateMap.put("recipe_menu_legend_redstone", main.getConfig().getString("recipe_menu_legend_redstone"));
+        translateMap.put("recipe_menu_legend_quartz", main.getConfig().getString("recipe_menu_legend_quartz"));
+        translateMap.put("recipe_menu_legend_gold", main.getConfig().getString("recipe_menu_legend_gold"));
+        translateMap.put("recipe_menu_legend_iron", main.getConfig().getString("recipe_menu_legend_iron"));
+        translateMap.put("recipe_menu_legend_glass", main.getConfig().getString("recipe_menu_legend_glass"));
+        translateMap.put("recipe_menu_legend_glowstone", main.getConfig().getString("recipe_menu_legend_glowstone"));
+        translateMap.put("recipe_menu_legend_diamond", main.getConfig().getString("recipe_menu_legend_diamond"));
+        translateMap.put("recipe_menu_legend_emerald", main.getConfig().getString("recipe_menu_legend_emerald"));
+        translateMap.put("recipe_menu_legend_ender_eye", main.getConfig().getString("recipe_menu_legend_ender_eye"));
+        translateMap.put("recipe_menu_legend_redstone_block", main.getConfig().getString("recipe_menu_legend_redstone_block"));
+        translateMap.put("recipe_menu_legend_diamond_block", main.getConfig().getString("recipe_menu_legend_diamond_block"));
+        translateMap.put("recipe_menu_legend_receiver", main.getConfig().getString("recipe_menu_legend_receiver"));
+        translateMap.put("recipe_menu_legend_cell_1k", main.getConfig().getString("recipe_menu_legend_cell_1k"));
+        translateMap.put("recipe_menu_legend_cell_4k", main.getConfig().getString("recipe_menu_legend_cell_4k"));
+        translateMap.put("recipe_menu_legend_cell_16k", main.getConfig().getString("recipe_menu_legend_cell_16k"));
+        translateMap.put("recipe_menu_legend_cell_64k", main.getConfig().getString("recipe_menu_legend_cell_64k"));
+        translateMap.put("recipe_menu_legend_cell_256k", main.getConfig().getString("recipe_menu_legend_cell_256k"));
+        translateMap.put("recipe_menu_legend_cell_1m", main.getConfig().getString("recipe_menu_legend_cell_1m"));
     }
 
     public static String getValue(String key) {

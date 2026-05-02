@@ -1,6 +1,7 @@
 package me.darkolythe.deepstorageplus.dsu.managers;
 
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
+import me.darkolythe.deepstorageplus.utils.ItemList;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -13,6 +14,8 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.NamespacedKey;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.util.Arrays;
 import java.util.List;
@@ -20,7 +23,7 @@ import java.util.List;
 public class WirelessManager {
 
     public static ItemStack createTerminal() {
-        ItemStack terminal = new ItemStack(Material.STONE_AXE);
+        ItemStack terminal = new ItemStack(ItemList.resolveItemMaterial(ItemList.KEY_TERMINAL, Material.STONE_AXE));
         ItemMeta meta = terminal.getItemMeta();
         meta.setUnbreakable(true);
         meta.addItemFlags(ItemFlag.HIDE_UNBREAKABLE);
@@ -31,20 +34,26 @@ public class WirelessManager {
                                    ChatColor.GRAY.toString() + LanguageManager.getValue("clicktolink"),
                                    ChatColor.GRAY + "---------------------",
                                    ChatColor.AQUA.toString() + LanguageManager.getValue("terminal")));
-        // set texture data ID
-        meta.setCustomModelData(13000);
+        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
+        String configuredModel = plugin.getConfig().getString("items." + ItemList.KEY_TERMINAL + ".item-model");
+        ItemList.applyConfiguredItemModel(meta, configuredModel, plugin);
+        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item_id"), PersistentDataType.STRING, ItemList.KEY_TERMINAL);
+        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item_group"), PersistentDataType.STRING, ItemList.GROUP_TOOL);
 
         terminal.setItemMeta(meta);
         return terminal;
     }
 
     public static ItemStack createReceiver() {
-        ItemStack receiver = new ItemStack(Material.STONE_AXE);
+        ItemStack receiver = new ItemStack(ItemList.resolveItemMaterial(ItemList.KEY_RECEIVER, Material.STONE_AXE));
         ItemMeta meta = receiver.getItemMeta();
         meta.setUnbreakable(true);
         meta.setDisplayName(ChatColor.AQUA + LanguageManager.getValue("receiver"));
-        // set texture data ID
-        meta.setCustomModelData(13001);
+        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
+        String configuredModel = plugin.getConfig().getString("items." + ItemList.KEY_RECEIVER + ".item-model");
+        ItemList.applyConfiguredItemModel(meta, configuredModel, plugin);
+        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item_id"), PersistentDataType.STRING, ItemList.KEY_RECEIVER);
+        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item_group"), PersistentDataType.STRING, ItemList.GROUP_TOOL);
         receiver.setItemMeta(meta);
         return receiver;
     }
@@ -65,10 +74,13 @@ public class WirelessManager {
                                    ChatColor.GRAY + LanguageManager.getValue("shiftswap"),
                                    ChatColor.AQUA.toString() + LanguageManager.getValue("terminal")));
         terminal.setItemMeta(meta);
-        terminal.addUnsafeEnchantment(Enchantment.DURABILITY, 1);
+        terminal.addUnsafeEnchantment(Enchantment.UNBREAKING, 1);
     }
 
     public static Inventory getWirelessDSU(ItemStack terminal, Player player) {
+        if (!ItemList.isItem(terminal, ItemList.KEY_TERMINAL)) {
+            return null;
+        }
         ItemMeta meta = terminal.getItemMeta();
         List<String> lore = meta.getLore();
         int x = Integer.parseInt(lore.get(1).replaceAll("^[^_]*:", "").replace(" ", "").replace(ChatColor.RED.toString(), ""));
@@ -108,14 +120,6 @@ public class WirelessManager {
     }
 
     public static boolean isWirelessTerminal(ItemStack item) {
-        if (item != null && item.hasItemMeta()) {
-            ItemMeta meta = item.getItemMeta();
-            if (meta.hasDisplayName() && meta.hasLore()) {
-                if (meta.getLore().get(meta.getLore().size() - 1).equals(ChatColor.AQUA + LanguageManager.getValue("terminal"))) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return ItemList.isItem(item, ItemList.KEY_TERMINAL);
     }
 }

@@ -32,24 +32,22 @@ public class WrenchListener implements Listener {
     private void onWrenchUse(PlayerInteractEvent event) {
         if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
             Player player = event.getPlayer();
-            ItemStack storageWrench = ItemList.createStorageWrench();
-            ItemStack sorterWrench = ItemList.createSorterWrench();
             ItemStack linkModule = ItemList.createLinkModule();
 
             Block block = event.getClickedBlock();
-            if (player.getInventory().getItemInMainHand().equals(storageWrench)
-                    || player.getInventory().getItemInMainHand().equals(sorterWrench)) {
+            if (ItemList.isItem(player.getInventory().getItemInMainHand(), ItemList.KEY_STORAGE_WRENCH)
+                    || ItemList.isItem(player.getInventory().getItemInMainHand(), ItemList.KEY_SORTER_WRENCH)) {
                 if (block != null && block.getType() == Material.CHEST) {
                     if (player.hasPermission("deepstorageplus.create")) {
                         if (!event.isCancelled()) {
                             event.setCancelled(true);
                             if (isInventoryEmpty(block)) {
                                 if (sizeOfInventory(block) == 54) {
-                                    if (player.getInventory().getItemInMainHand().equals(storageWrench)) {
+                                    if (ItemList.isItem(player.getInventory().getItemInMainHand(), ItemList.KEY_STORAGE_WRENCH)) {
                                         createDSU(block);
                                         player.getInventory().getItemInMainHand().setAmount(0);
                                         player.sendMessage(DeepStoragePlus.prefix + ChatColor.GREEN + LanguageManager.getValue("dsucreate"));
-                                    } else if (player.getInventory().getItemInMainHand().equals(sorterWrench)) {
+                                    } else if (ItemList.isItem(player.getInventory().getItemInMainHand(), ItemList.KEY_SORTER_WRENCH)) {
                                         createSorter(block);
                                         player.getInventory().getItemInMainHand().setAmount(0);
                                         player.sendMessage(DeepStoragePlus.prefix + ChatColor.GREEN + LanguageManager.getValue("sortercreate"));

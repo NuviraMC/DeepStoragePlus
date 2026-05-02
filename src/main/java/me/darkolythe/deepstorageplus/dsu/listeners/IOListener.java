@@ -3,14 +3,13 @@ package me.darkolythe.deepstorageplus.dsu.listeners;
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
 import me.darkolythe.deepstorageplus.dsu.StorageUtils;
 import me.darkolythe.deepstorageplus.dsu.managers.DSUManager;
-import me.darkolythe.deepstorageplus.dsu.managers.SorterManager;
+import me.darkolythe.deepstorageplus.utils.ItemList;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
-import org.bukkit.block.Container;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -25,17 +24,17 @@ import org.bukkit.inventory.meta.ItemMeta;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.hasNoMeta;
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.stringToMat;
 import static me.darkolythe.deepstorageplus.dsu.managers.DSUManager.addDataToContainer;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpeedUpgrade;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.getSpeedUpgrade;
-import static me.darkolythe.deepstorageplus.utils.ItemList.createSpeedUpgrade;
 
 public class IOListener implements Listener {
 
-    private DeepStoragePlus main;
+    private final DeepStoragePlus main;
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin; // set it equal to an instance of main
     }
@@ -51,7 +50,7 @@ public class IOListener implements Listener {
                     Inventory inv = chest.getInventory();
                     if (chest.getInventory().contains(DSUManager.getDSUWall())) {
                         ItemStack item = player.getInventory().getItemInMainHand();
-                        if (compareItemStacks(item, createSpeedUpgrade())) {
+                        if (ItemList.isItem(item, ItemList.KEY_SPEED_UPGRADE)) {
                             ItemStack IOItem = inv.getItem(53);
                             ItemStack newIOItem = addSpeedUpgrade(IOItem);
                             if (newIOItem != null) {
@@ -61,7 +60,9 @@ public class IOListener implements Listener {
                             } else {
                                 player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("upgradefail"));
                             }
-                            inv.getLocation().getBlock().getState().update();
+                            if (inv.getLocation() != null) {
+                                inv.getLocation().getBlock().getState().update();
+                            }
                             event.setCancelled(true);
                         }
                     }
@@ -124,47 +125,81 @@ public class IOListener implements Listener {
     }
 
     private static Material getInput(ItemStack item) {
-        ItemMeta meta = item.getItemMeta();
-        List<String> lore = meta.getLore();
-        if (lore.get(0).contains(LanguageManager.getValue("all"))) {
+        if (item == null || !item.hasItemMeta()) {
             return null;
-        } else {
-            return stringToMat(lore.get(0), ChatColor.GRAY + LanguageManager.getValue("input") + ": " + ChatColor.GREEN);
         }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        List<String> lore = meta.getLore();
+        if (lore == null || lore.isEmpty()) {
+            return null;
+        }
+
+        String line = findIOLine(lore, LanguageManager.getValue("input"), "input", "eingang");
+        if (line == null) {
+            return null;
+        }
+
+        String value = extractIOValue(line);
+        if (isAllValue(value)) {
+            return null;
+        }
+
+        return stringToMat(line, "");
     }
 
     private static Material getOutput(ItemStack item) {
-        ItemMeta meta = item.getItemMeta();
-        List<String> lore = meta.getLore();
-        if (lore.get(1).contains(LanguageManager.getValue("none"))) {
+        if (item == null || !item.hasItemMeta()) {
             return null;
-        } else {
-            return stringToMat(lore.get(1), ChatColor.GRAY + LanguageManager.getValue("output") + ": " + ChatColor.GREEN);
         }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        List<String> lore = meta.getLore();
+        if (lore == null || lore.size() < 2) {
+            return null;
+        }
+
+        String line = findIOLine(lore, LanguageManager.getValue("output"), "output", "ausgang");
+        if (line == null) {
+            return null;
+        }
+
+        String value = extractIOValue(line);
+        if (isNoneValue(value)) {
+            return null;
+        }
+
+        Material parsed = stringToMat(line, "");
+        return parsed == Material.AIR ? null : parsed;
     }
 
     private void lookForItemInHopper(Inventory initial, Inventory dest, Material input, int amt) {
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, new Runnable() {
-            @Override
-            public void run() {
-                boolean moved_stack = false;
-                for (int i = 0; i < 5; i++) {
-                    if (!moved_stack) {
-                        ItemStack toMove = initial.getItem(i);
-                        if (toMove != null && (input == null || input == toMove.getType())) {
-                            ItemStack moving = toMove.clone();
-                            moving.setAmount(Math.min(amt, toMove.getAmount()));
-                            if (hasNoMeta(moving)) { //items being stored cannot have any special features. ie: damage, enchants, name, lore.
-                                for (int j = 0; j < 5; j++) {
-                                    if (moving.getAmount() > 0) { //if the item amount is greater than 0, it means there are still items to put in the containers
-                                        addDataToContainer(dest.getItem(8 + (9 * j)), moving); //add the item to the current loop container
-                                        toMove.setAmount(toMove.getAmount() - (amt - moving.getAmount()));
-
-                                        main.dsuupdatemanager.updateItems(dest, input);
-                                        moved_stack = true;
-                                    } else {
-                                        break;
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
+            boolean moved_stack = false;
+            for (int i = 0; i < 5; i++) {
+                if (!moved_stack) {
+                    ItemStack toMove = initial.getItem(i);
+                    if (toMove != null && (input == null || input == toMove.getType())) {
+                        ItemStack moving = toMove.clone();
+                        moving.setAmount(Math.min(amt, toMove.getAmount()));
+                        if (hasNoMeta(moving)) { //items being stored cannot have any special features. ie: damage, enchants, name, lore.
+                            for (int j = 0; j < 5; j++) {
+                                if (moving.getAmount() > 0) { //if the item amount is greater than 0, it means there are still items to put in the containers
+                                    ItemStack container = dest.getItem(8 + (9 * j));
+                                    if (container == null) {
+                                        continue;
                                     }
+                                    addDataToContainer(container, moving); //add the item to the current loop container
+                                    toMove.setAmount(toMove.getAmount() - (amt - moving.getAmount()));
+
+                                    main.dsuupdatemanager.updateItems(dest, input);
+                                    moved_stack = true;
+                                } else {
+                                    break;
                                 }
                             }
                         }
@@ -175,45 +210,90 @@ public class IOListener implements Listener {
     }
 
     private void lookForItemInChest(Material output, Inventory initial, Inventory dest, ItemStack moveItem, int amt) {
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, new Runnable() {
-            @Override
-            public void run() {
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
 
-                if (initial.first(moveItem.getType()) != 0) {
-                    return;
+            if (moveItem == null || output == null || output == Material.AIR) {
+                return;
+            }
+
+            int totalAmount = DSUManager.getTotalMaterialAmount(initial, output);
+            int allowed_amt = Math.min(amt, totalAmount);
+            if (allowed_amt <= 0) {
+                return;
+            }
+
+            for (int i = 0; i < 5; i++) {
+                ItemStack container = initial.getItem(8 + (9 * i));
+                if (container == null || container.getType() == Material.WHITE_STAINED_GLASS_PANE || !container.hasItemMeta()) {
+                    continue;
                 }
-
-                if (output != null) {
-                    for (int i = 0; i < 5; i++) {
-                        ItemStack container = initial.getItem(8 + (9 * i));
-                        if (container.getType() != Material.WHITE_STAINED_GLASS_PANE) {
-                            HashSet<Material> mats = DSUManager.getTypes(container.getItemMeta().getLore());
-                            // get the amount that can be taken from the DSU
-                            int allowed_amt = Math.min(amt, DSUManager.getTotalMaterialAmount(initial, output));
-                            if (mats.contains(output)) {
-                                HashMap<Integer, ItemStack> items = dest.addItem(new ItemStack(output, allowed_amt));
-                                // subtract any item counts that cant fit into the output hopper
-                                int sub = 0;
-                                for (ItemStack overflow : items.values()) {
-                                    sub += overflow.getAmount();
-                                }
-                                DSUManager.takeItems(output, initial, allowed_amt - sub);
-
-                                main.dsuupdatemanager.updateItems(initial, output);
-                                return;
-                            }
-                        }
+                ItemMeta containerMeta = container.getItemMeta();
+                List<String> containerLore = containerMeta != null ? containerMeta.getLore() : null;
+                if (containerLore == null) {
+                    continue;
+                }
+                HashSet<Material> mats = DSUManager.getTypes(containerLore);
+                if (mats.contains(output)) {
+                    HashMap<Integer, ItemStack> items = dest.addItem(new ItemStack(output, allowed_amt));
+                    // subtract any item counts that cant fit into the output hopper
+                    int sub = 0;
+                    for (ItemStack overflow : items.values()) {
+                        sub += overflow.getAmount();
                     }
+                    DSUManager.takeItems(output, initial, allowed_amt - sub);
+
+                    main.dsuupdatemanager.updateItems(initial, output);
+                    return;
                 }
             }
         }, 1);
     }
 
-    private static boolean compareItemStacks(ItemStack item1, ItemStack item2) {
-        ItemStack i1 = item1.clone();
-        ItemStack i2 = item2.clone();
-        i1.setAmount(1);
-        i2.setAmount(1);
-        return i1.equals(i2);
+    private static String findIOLine(List<String> lore, String configuredKey, String... aliases) {
+        String normalizedConfigured = normalizeToken(configuredKey);
+        for (String line : lore) {
+            String normalizedLine = normalizeToken(ChatColor.stripColor(line));
+            if (normalizedLine.isEmpty()) {
+                continue;
+            }
+            if (!normalizedConfigured.isEmpty() && normalizedLine.startsWith(normalizedConfigured + ":")) {
+                return line;
+            }
+            for (String alias : aliases) {
+                String normalizedAlias = normalizeToken(alias);
+                if (!normalizedAlias.isEmpty() && normalizedLine.startsWith(normalizedAlias + ":")) {
+                    return line;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String extractIOValue(String line) {
+        String stripped = ChatColor.stripColor(line);
+        if (stripped == null || stripped.isEmpty()) {
+            return "";
+        }
+        int idx = stripped.indexOf(':');
+        if (idx < 0 || idx + 1 >= stripped.length()) {
+            return stripped.trim();
+        }
+        return stripped.substring(idx + 1).trim();
+    }
+
+    private static boolean isAllValue(String value) {
+        String normalized = normalizeToken(value);
+        String config = normalizeToken(LanguageManager.getValue("all"));
+        return normalized.equals("all") || normalized.equals("alle") || (!config.isEmpty() && normalized.equals(config));
+    }
+
+    private static boolean isNoneValue(String value) {
+        String normalized = normalizeToken(value);
+        String config = normalizeToken(LanguageManager.getValue("none"));
+        return normalized.equals("none") || normalized.equals("keine") || (!config.isEmpty() && normalized.equals(config));
+    }
+
+    private static String normalizeToken(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 }

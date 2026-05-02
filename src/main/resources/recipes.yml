@@ -1,0 +1,174 @@
+recipes:
+  storage_cell_1k:
+    category: cells
+    result: item:storage_cell_1k
+    shape: ["RQR", "QGQ", "RQR"]
+    ingredients:
+      R: REDSTONE
+      Q: QUARTZ
+      G: GOLD_INGOT
+
+  storage_cell_4k:
+    category: cells
+    result: item:storage_cell_4k
+    shape: ["RIR", "CGC", "RCR"]
+    ingredients:
+      R: REDSTONE
+      I: IRON_INGOT
+      C: item:storage_cell_1k
+      G: GLASS
+
+  storage_cell_16k:
+    category: cells
+    result: item:storage_cell_16k
+    shape: ["SDS", "CLC", "SCS"]
+    ingredients:
+      S: GLOWSTONE_DUST
+      D: DIAMOND
+      C: item:storage_cell_4k
+      L: GLASS
+
+  storage_cell_64k:
+    category: cells
+    result: item:storage_cell_64k
+    shape: ["SDS", "CLC", "SCS"]
+    ingredients:
+      S: GLOWSTONE_DUST
+      D: DIAMOND
+      C: item:storage_cell_16k
+      L: GLASS
+
+  storage_cell_256k:
+    category: cells
+    result: item:storage_cell_256k
+    shape: ["EDE", "CLC", "ESE"]
+    ingredients:
+      E: EMERALD
+      D: DIAMOND
+      C: item:storage_cell_64k
+      L: GLASS
+      S: GLOWSTONE_DUST
+
+  storage_cell_1m:
+    category: cells
+    result: item:storage_cell_1m
+    shape: ["EDE", "CLC", "ESE"]
+    ingredients:
+      E: EMERALD
+      D: DIAMOND
+      C: item:storage_cell_256k
+      L: GLASS
+      S: GLOWSTONE_DUST
+
+  storage_container_1k:
+    category: containers
+    result: item:storage_container_1k
+    shape: ["GRG", "RCR", "III"]
+    ingredients:
+      G: GLASS
+      R: REDSTONE
+      C: item:storage_cell_1k
+      I: IRON_INGOT
+
+  storage_container_4k:
+    category: containers
+    result: item:storage_container_4k
+    shape: ["GRG", "RCR", "III"]
+    ingredients:
+      G: GLASS
+      R: REDSTONE
+      C: item:storage_cell_4k
+      I: IRON_INGOT
+
+  storage_container_16k:
+    category: containers
+    result: item:storage_container_16k
+    shape: ["GRG", "RCR", "GGG"]
+    ingredients:
+      G: GLASS
+      R: REDSTONE
+      C: item:storage_cell_16k
+
+  storage_container_64k:
+    category: containers
+    result: item:storage_container_64k
+    shape: ["GRG", "RCR", "GGG"]
+    ingredients:
+      G: GLASS
+      R: REDSTONE
+      C: item:storage_cell_64k
+
+  storage_container_256k:
+    category: containers
+    result: item:storage_container_256k
+    shape: ["GRG", "RCR", "DDD"]
+    ingredients:
+      G: GLASS
+      R: REDSTONE
+      C: item:storage_cell_256k
+      D: DIAMOND
+
+  storage_container_1m:
+    category: containers
+    result: item:storage_container_1m
+    shape: ["GRG", "RCR", "DDD"]
+    ingredients:
+      G: GLASS
+      R: REDSTONE
+      C: item:storage_cell_1m
+      D: DIAMOND
+
+  storage_wrench:
+    category: tools
+    result: item:storage_wrench
+    shape: ["I I", " Q ", "I I"]
+    ingredients:
+      I: IRON_INGOT
+      Q: QUARTZ
+
+  sorter_wrench:
+    category: tools
+    result: item:sorter_wrench
+    shape: ["I I", " G ", "I I"]
+    ingredients:
+      I: IRON_INGOT
+      G: GOLD_INGOT
+
+  link_module:
+    category: tools
+    result: item:link_module
+    shape: ["RQR", "DGD", "RQR"]
+    ingredients:
+      R: REDSTONE
+      Q: QUARTZ
+      D: DIAMOND
+      G: GOLD_INGOT
+
+  receiver:
+    category: wireless
+    result: item:receiver
+    shape: [" E ", " Q ", "IDI"]
+    ingredients:
+      E: ENDER_EYE
+      Q: QUARTZ
+      I: IRON_INGOT
+      D: DIAMOND
+
+  terminal:
+    category: wireless
+    result: item:terminal
+    shape: [" R ", "DID", "QDQ"]
+    ingredients:
+      R: item:receiver
+      D: REDSTONE_BLOCK
+      I: DIAMOND_BLOCK
+      Q: QUARTZ
+
+  speed_upgrade:
+    category: wireless
+    result: item:speed_upgrade
+    shape: ["RRR", "RDR", "RRR"]
+    ingredients:
+      R: REDSTONE
+      D: DIAMOND
+

@@ -54,6 +54,8 @@ public class SorterManager {
         ItemStack border = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta bordermeta = border.getItemMeta();
         bordermeta.setDisplayName(ChatColor.DARK_GRAY + LanguageManager.getValue("sorterwalls"));
+        bordermeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, "sorter_wall");
+        bordermeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
         border.setItemMeta(bordermeta);
 
         return sorterWall = border;
@@ -66,6 +68,8 @@ public class SorterManager {
         ItemStack storage = new ItemStack(Material.WHITE_STAINED_GLASS_PANE);
         ItemMeta storagemeta = storage.getItemMeta();
         storagemeta.setDisplayName(ChatColor.YELLOW + LanguageManager.getValue("emptysorterblock"));
+        storagemeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, "sorter_empty_block");
+        storagemeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
         storage.setItemMeta(storagemeta);
 
         return storage;
@@ -207,8 +211,7 @@ public class SorterManager {
     }
 
     private static Optional<Location> getLinkModuleLocation(ItemStack linkModule) {
-        if (linkModule.hasItemMeta()
-                && linkModule.getItemMeta().hasDisplayName() && linkModule.getItemMeta().getDisplayName().equals(ItemList.createLinkModule().getItemMeta().getDisplayName())
+        if (ItemList.isItem(linkModule, ItemList.KEY_LINK_MODULE)
                 && linkModule.getItemMeta().hasLore() && linkModule.getItemMeta().getLore().size() > 0) {
             try {
                 String[] loreLocationArr = ChatColor.stripColor(linkModule.getItemMeta().getLore().get(0)).split("\\s+");

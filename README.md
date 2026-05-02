@@ -1,8 +1,7 @@
 # DeepStoragePlus
 Adds the Applied Energistics 2 feature of storing bulk items
 
-Dependency: CustomRecipeAPI
-You need to download CustomRecipeAPI and put it in your plugins folder for this plugin to run
+No external recipe plugin is required. Use `/dsp recipes` in-game to open the built-in recipe menu.
 DeepStoragePlus Is a mini-clone of the very popular mod Applied Energistics. This plugin includes the bulk storage feature of AE, and may have more features coming in the future.
 DeepStoragePlus helps you store bulk items in a Deep Storage Unit, and implements "Storage Containers" which are super easy to move in your inventory.
 
@@ -18,22 +17,15 @@ Features:
 - Realistic, not too OP
 
 
-There are Many important recipes to know, so I've made a docs page for more info here: DOCS PAGE (not being updated anymore. CustomRecipeAPI 1.1.0 has a recipe book)
+There are many important recipes; open them directly in-game with `/dsp recipes`.
 
-If you're running the latest versions of DeepStoragePlus and CustomRecipeAPI, there is a recipe book that shows all these recipes. Check it out on the CustomRecipeAPI page.
-
+`/dsp recipes` opens a categorized GUI with recipe patterns and ingredient legends.
 
 deepstorageplus.create:
   description: Allows the user to create a DSU
   default: op
 deepstorageplus.adminopen:
   description: Allows the user to open locked DSUs
-  default: op
-crapi.command:
-  description: Allows the use of CustomRecipeAPI commands
-  default: op
-crapi.book:
-  description: Allows the use of CustomRecipeAPI recipe book
   default: op
 deepstorageplus.wireless:
   description: Allows the user to use the wireless terminal

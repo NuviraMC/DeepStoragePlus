@@ -1,12 +1,11 @@
 name: DeepStoragePlus
 version: 1.11.10
 main: me.darkolythe.deepstorageplus.DeepStoragePlus
-api-version: 1.13
-depend: [CustomRecipeAPI]
+api-version: "1.21"
 
 commands:
   deepstorageplus:
-    usage: /<command>
+    usage: /<command> [reload [recipes]|recipes|debugmaterial [item]|debugmodel [item]|debugio|items|give <player> <item> [amount]|give <item> [amount]]
     aliases: [dsp]
     description: the base dsp command
     permission: deepstorageplus.command
@@ -15,6 +14,9 @@ commands:
 permissions:
   deepstorageplus.create:
     description: Allows the user to create a DSU
+    default: op
+  deepstorageplus.admin:
+    description: Allows admin commands like reload
     default: op
   deepstorageplus.adminopen:
     description: Allows the user to open locked DSUs
