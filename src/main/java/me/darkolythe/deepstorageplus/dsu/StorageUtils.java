@@ -11,6 +11,7 @@ import org.bukkit.block.DoubleChest;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -20,6 +21,8 @@ public class StorageUtils {
 
     /*
     Check if the item "has no meta" which counts enchants, damage, lore, name, etc.
+    NOTE: item-model alone is NOT considered "meta" for DSU purposes — items that only
+    have a custom item-model (resource pack texture) are treated as plain vanilla items.
      */
     public static boolean hasNoMeta(ItemStack item) {
         if (ItemList.isPluginItem(item)) {
@@ -58,6 +61,9 @@ public class StorageUtils {
                 }
                 return false;
             }
+            // item-model alone (resource pack texture override) is intentionally ignored here.
+            // An item that only has a custom item-model set but no name/lore/enchants
+            // is functionally a plain item and should be storable in the DSU.
         }
         return true;
     }

@@ -3,6 +3,7 @@ package me.darkolythe.deepstorageplus.dsu.listeners;
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
 import me.darkolythe.deepstorageplus.dsu.StorageUtils;
 import me.darkolythe.deepstorageplus.dsu.managers.DSUManager;
+import me.darkolythe.deepstorageplus.dsu.managers.DSUUpdateManager;
 import me.darkolythe.deepstorageplus.dsu.managers.SorterManager;
 import me.darkolythe.deepstorageplus.utils.ItemList;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
@@ -10,6 +11,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.block.Container;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -35,7 +37,25 @@ public class InventoryListener implements Listener {
     private final Map<UUID, Integer> ioSelectionSlot = new ConcurrentHashMap<>();
 
     public InventoryListener(DeepStoragePlus plugin) {
-        this.main = plugin; // set it equal to an instance of main
+        this.main = plugin;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Helper: build a proper ItemStack to give back to the player after taking
+    // items out of the DSU. Copies the item-model from the display item so the
+    // resource-pack texture is preserved.
+    // ---------------------------------------------------------------------------
+    private static ItemStack buildTakeItem(Material mat, int amount, Inventory dsuInv) {
+        // Re-use DSUUpdateManager.createItem which already handles item-model lookup,
+        // then just fix the amount and strip the DSU-internal lore.
+        ItemStack display = DSUUpdateManager.createItem(mat, dsuInv);
+        ItemMeta meta = display.getItemMeta();
+        if (meta != null) {
+            meta.setLore(null); // remove "Item Count: x" lore
+            display.setItemMeta(meta);
+        }
+        display.setAmount(amount);
+        return display;
     }
 
     @EventHandler
@@ -82,7 +102,7 @@ public class InventoryListener implements Listener {
                     if (event.getSlot() == 8 || event.getSlot() == 17) {
                         ioSelectionSlot.put(player.getUniqueId(), event.getSlot());
                         startSelection(event.getSlot(), inv);
-                    } else { //change selection and io items
+                    } else {
                         int selectedSlot = ioSelectionSlot.getOrDefault(player.getUniqueId(), findActiveSelectionSlot(inv));
                         boolean canSelectFromTop = event.getClickedInventory() == inv && event.getSlot() % 9 != 8 && event.getSlot() % 9 != 7;
                         boolean canSelectFromBottom = event.getClickedInventory() == player.getInventory();
@@ -102,7 +122,7 @@ public class InventoryListener implements Listener {
                                 inv.setItem(selectedSlot, newitem);
                                 ioSelectionSlot.remove(player.getUniqueId());
                             }
-                        } else { //change sorting types in io config
+                        } else {
                             if (item != null && item.getType() == Material.COMPASS) {
                                 if (event.getClick() != ClickType.DOUBLE_CLICK) {
                                     ItemMeta meta = item.getItemMeta();
@@ -124,7 +144,7 @@ public class InventoryListener implements Listener {
                                 } else if (item != null && ItemList.KEY_DSU_LOCK.equals(ItemList.getItemId(item))) {
                                 boolean isOwner = player.getUniqueId().toString().equals(getOwner(item)[1]);
                                 boolean isOp = player.hasPermission("deepstorageplus.adminopen");
-                                if (isOwner || isOp) { //only the owner or admin can edit the lock settings
+                                if (isOwner || isOp) {
                                     if (event.getClick() == ClickType.RIGHT) {
                                         ItemMeta meta = item.getItemMeta();
                                             if (meta != null) {
@@ -151,26 +171,26 @@ public class InventoryListener implements Listener {
                     }
                 } else if (event.getView().getTitle().equals(DeepStoragePlus.DSUname) || StorageUtils.isDSU(inv)) {
                     if (event.getClickedInventory() != player.getInventory()) {
-                        if (event.getSlot() % 9 == 8) { //rightmost column
-                            if (event.getSlot() != 53) { //if containers clicked
-                                if (cursor != null && cursor.getType() != Material.AIR) { //if putting container in
+                        if (event.getSlot() % 9 == 8) {
+                            if (event.getSlot() != 53) {
+                                if (cursor != null && cursor.getType() != Material.AIR) {
                                     if (item != null && item.getType() == Material.WHITE_STAINED_GLASS_PANE) {
                                         event.setCancelled(true);
-                                            if (cursor.hasItemMeta()) { //if putting a Storage Container in the dsu
+                                            if (cursor.hasItemMeta()) {
                                                 if (ItemList.isGroup(cursor, ItemList.GROUP_STORAGE_CONTAINER)) {
                                                 inv.setItem(event.getSlot(), cursor);
                                                 player.setItemOnCursor(new ItemStack(Material.AIR));
                                                 main.dsuupdatemanager.updateItems(inv, null);
                                             }
                                         }
-                                    } else { //if trying to take placeholder out
+                                    } else {
                                         if (!ItemList.isGroup(cursor, ItemList.GROUP_STORAGE_CONTAINER)) {
                                             event.setCancelled(true);
                                         } else if (event.isShiftClick()) {
                                             event.setCancelled(true);
                                         }
                                     }
-                                } else { //if taking container out
+                                } else {
                                     event.setCancelled(true);
                                     if (item != null && item.getType() != Material.WHITE_STAINED_GLASS_PANE) {
                                         player.setItemOnCursor(item.clone());
@@ -178,45 +198,47 @@ public class InventoryListener implements Listener {
                                         main.dsuupdatemanager.updateItems(inv, null);
                                     }
                                 }
-                            } else { //if io is clicked
+                            } else {
                                 event.setCancelled(true);
                                 if (cursor == null || cursor.getType() == Material.AIR) {
                                     if (item != null && item.hasItemMeta()) {
-                                            if (ItemList.isItem(item, ItemList.KEY_IO_SETTINGS)) { //BOTTOM RIGHT FOR SETTINGS
+                                            if (ItemList.isItem(item, ItemList.KEY_IO_SETTINGS)) {
                                             player.openInventory(createIOInventory(inv));
                                         }
                                     }
                                 }
                             }
-                        } else if (event.getSlot() % 9 == 7) { //walls
+                        } else if (event.getSlot() % 9 == 7) {
                             event.setCancelled(true);
-                        } else { //items
+                        } else {
                             event.setCancelled(true);
                             if (cursor != null && cursor.getType() != Material.AIR) {
                                 Material mat = cursor.getType();
-                                boolean isvaliditem = DSUManager.addToDSU(cursor, event.getClickedInventory(), player); //try to add item to dsu
+                                boolean isvaliditem = DSUManager.addToDSU(cursor, event.getClickedInventory(), player);
 
                                 main.dsuupdatemanager.updateItems(inv, mat);
 
                                 if (cursor.getAmount() > 0 && isvaliditem) {
                                     player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("containersfull"));
                                 }
-                            } else if (cursor == null || cursor.getType() == Material.AIR && item != null) { //taking item out of dsu
+                            } else if (cursor == null || cursor.getType() == Material.AIR && item != null) {
                                 if (event.getClick() != ClickType.DOUBLE_CLICK) {
                                     Material mat = item != null ? item.getType() : Material.AIR;
                                     if (event.isShiftClick()) {
                                         if (player.getInventory().firstEmpty() != -1) {
                                             int amtTaken = DSUManager.takeItems(mat, inv, mat.getMaxStackSize());
                                             if (amtTaken > 0) {
-                                                player.getInventory().addItem(new ItemStack(mat, amtTaken));
+                                                // Use buildTakeItem to preserve item-model
+                                                player.getInventory().addItem(buildTakeItem(mat, amtTaken, inv));
                                             }
                                         } else {
-                                                    player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("nomorespace"));
+                                            player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("nomorespace"));
                                         }
                                     } else {
                                         int amtTaken = DSUManager.takeItems(mat, inv, mat.getMaxStackSize());
                                         if (amtTaken > 0) {
-                                            player.setItemOnCursor(new ItemStack(mat, amtTaken));
+                                            // Use buildTakeItem to preserve item-model
+                                            player.setItemOnCursor(buildTakeItem(mat, amtTaken, inv));
                                         }
                                     }
 
@@ -224,7 +246,7 @@ public class InventoryListener implements Listener {
                                 }
                             }
                         }
-                    } else { //if click is in player inventory
+                    } else {
                         if (event.isShiftClick()) {
                             if (item != null && item.getType() != Material.AIR) {
                                 main.dsumanager.addItemToDSU(item, player);
@@ -237,38 +259,37 @@ public class InventoryListener implements Listener {
 
                 } else if (event.getView().getTitle().equals(DeepStoragePlus.sortername) || StorageUtils.isSorter(inv)) {
                     if (event.getClickedInventory() != player.getInventory()) {
-                        if (event.getSlot() > 26) { // link module field
-                            if (cursor != null && cursor.getType() != Material.AIR) { //if putting container in
+                        if (event.getSlot() > 26) {
+                            if (cursor != null && cursor.getType() != Material.AIR) {
                                 if (item != null && item.getType() == Material.WHITE_STAINED_GLASS_PANE) {
                                     event.setCancelled(true);
-                                    //if putting a link module into the sorter
                                     if (ItemList.isItem(cursor, ItemList.KEY_LINK_MODULE)) {
                                         inv.setItem(event.getSlot(), cursor);
                                         player.setItemOnCursor(new ItemStack(Material.AIR));
                                     }
-                                } else { //if trying to take placeholder out
+                                } else {
                                     if (!ItemList.isItem(cursor, ItemList.KEY_LINK_MODULE)) {
                                         event.setCancelled(true);
                                     } else if (event.isShiftClick()) {
                                         event.setCancelled(true);
                                     }
                                 }
-                            } else { //if taking link module out
+                            } else {
                                 event.setCancelled(true);
                                 if (item != null && item.getType() != Material.WHITE_STAINED_GLASS_PANE) {
                                     player.setItemOnCursor(item.clone());
                                     inv.setItem(event.getSlot(), DSUManager.getEmptyBlock());
                                 }
                             }
-                        } else if (event.getSlot() > 17 && event.getSlot() < 27) { //walls
+                        } else if (event.getSlot() > 17 && event.getSlot() < 27) {
                             event.setCancelled(true);
-                        } else { //items
-                            if (cursor != null && cursor.getType() != Material.AIR) { //putting an item into the sorter
+                        } else {
+                            if (cursor != null && cursor.getType() != Material.AIR) {
                                 main.sorterUpdateManager.sortItems(inv, DeepStoragePlus.minTimeSinceLastSortPlayer);
                             }
                         }
                     }
-                    else { //if click is in player inventory
+                    else {
                         if (event.isShiftClick()) {
                             if (item != null && item.getType() != Material.AIR) {
                                 main.sorterUpdateManager.sortItems(inv, DeepStoragePlus.minTimeSinceLastSortPlayer);
@@ -294,9 +315,6 @@ public class InventoryListener implements Listener {
         }
     }
 
-    /*
-     * Update DSU with IO settings when closing IO settings menu
-     */
     @EventHandler
     private void onInventoryClose(InventoryCloseEvent event) {
         if (event.getPlayer() instanceof Player player) {
@@ -355,7 +373,6 @@ public class InventoryListener implements Listener {
                     i.setItemMeta(m);
                 }
 
-                // Open the DSU's main inventory after the player closes the settings menu
                 Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
                         if (DeepStoragePlus.gettingInput.containsKey(player.getUniqueId()) && Boolean.FALSE.equals(DeepStoragePlus.gettingInput.get(player.getUniqueId()))) {
                         player.openInventory(DSU);
