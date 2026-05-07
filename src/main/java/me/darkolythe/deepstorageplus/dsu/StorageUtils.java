@@ -11,7 +11,6 @@ import org.bukkit.block.DoubleChest;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -20,61 +19,12 @@ import java.util.Locale;
 public class StorageUtils {
 
     /**
-     * Returns true if the item has no "meaningful" meta — i.e. it is a plain
-     * vanilla item that the DSU can store.
-     *
-     * Explicitly ignored (NOT considered meaningful meta):
-     *   - item-model / custom-model-data  (resource-pack texture overrides)
-     *   - the internal "Item Count: x" lore added by DSUUpdateManager.createItem()
-     *
-     * Everything else (display name, lore, enchants, damage, potion type, …)
-     * still blocks the item from being stored.
+     * Voll permissiv: DSU/Sorter/Hopper sollen alle normalen Items akzeptieren.
+     * Blockiert werden nur interne Plugin-Items, damit die GUI-Items nicht
+     * versehentlich eingespeichert werden.
      */
     public static boolean hasNoMeta(ItemStack item) {
-        if (ItemList.isPluginItem(item)) {
-            return false;
-        }
-        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.Damageable damageable && damageable.getDamage() != 0) {
-            return false;
-        }
-        if (item.getType().toString().contains("SHULKER_BOX")) {
-            return false;
-        }
-        var meta = item.getItemMeta();
-        if (meta != null) {
-            if (meta.hasEnchants()) {
-                return false;
-            }
-            if (meta.hasDisplayName()) {
-                return false;
-            }
-            if (item.getType() == Material.ENCHANTED_BOOK) {
-                return false;
-            }
-            if (item.getType() == Material.FIREWORK_ROCKET) {
-                return false;
-            }
-            if (item.getType().toString().contains("POTION")) {
-                return false;
-            }
-            if (item.getType() == Material.TIPPED_ARROW) {
-                return false;
-            }
-            if (meta.hasLore()) {
-                var lore = meta.getLore();
-                // Allow items whose only lore is the internal DSU display lore
-                // ("Item Count: x") — these are display items that were taken out
-                // of the DSU grid and should be storable again.
-                if (lore != null && !lore.isEmpty() && lore.getFirst().contains("Item Count: ")) {
-                    return true;
-                }
-                return false;
-            }
-            // item-model alone (resource pack texture override) is intentionally NOT
-            // treated as meaningful meta. An item that only has an item-model set but
-            // no name/lore/enchants is functionally a plain item and should be storable.
-        }
-        return true;
+        return item != null && !ItemList.isPluginItem(item);
     }
 
     /*
@@ -105,12 +55,8 @@ public class StorageUtils {
         }
 
         String cleaned = ChatColor.stripColor(str);
-        if (cleaned == null) {
-            return Material.AIR;
-        }
-
         String removeToken = ChatColor.stripColor(remStr == null ? "" : remStr);
-        if (removeToken != null && !removeToken.isEmpty()) {
+        if (!removeToken.isEmpty()) {
             cleaned = cleaned.replace(removeToken, "");
         }
 
@@ -179,13 +125,13 @@ public class StorageUtils {
     public static Optional<String> getChestCustomName(Block block) {
         Chest chest = (Chest) block.getState();
         if (chest.getInventory().getHolder() instanceof DoubleChest doubleChest) {
-            Chest leftChest = (Chest) doubleChest.getLeftSide();
-            Chest rightChest = (Chest) doubleChest.getRightSide();
-            String leftName = leftChest.getCustomName();
+            Chest leftChest = doubleChest.getLeftSide() instanceof Chest c ? c : null;
+            Chest rightChest = doubleChest.getRightSide() instanceof Chest c ? c : null;
+            String leftName = leftChest != null ? leftChest.getCustomName() : null;
             if (leftName != null) {
                 return Optional.of(leftName);
             }
-            String rightName = rightChest.getCustomName();
+            String rightName = rightChest != null ? rightChest.getCustomName() : null;
             if (rightName != null) {
                 return Optional.of(rightName);
             }

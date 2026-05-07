@@ -5,7 +5,6 @@ import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -14,7 +13,7 @@ import java.util.*;
 
 public class DSUUpdateManager {
 
-    private DeepStoragePlus main;
+    private final DeepStoragePlus main;
     public DSUUpdateManager(DeepStoragePlus plugin) {
         main = plugin;
     }
@@ -22,93 +21,87 @@ public class DSUUpdateManager {
     /*
     Update the items in the dsu. This is done when items are added, taken, Storage Containers are added, taken, and when opening the dsu.
      */
-    public void updateItems(Inventory inv, Material mat) {
+    public void updateItemsExact(Inventory inv) {
         if (inv.getLocation() == null) {
             return;
         }
         if (!DeepStoragePlus.recentDSUCalls.containsKey(inv.getLocation())) {
             DeepStoragePlus.recentDSUCalls.put(inv.getLocation(), 0L);
         }
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, new Runnable() {
-            @Override
-            public void run() {
-                // if over a second has passed since the last bulk item was placed in the dsu, update it
-                if (!DeepStoragePlus.recentDSUCalls.containsKey(inv.getLocation())) {
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
+            // if over a second has passed since the last bulk item was placed in the dsu, update it
+            if (!DeepStoragePlus.recentDSUCalls.containsKey(inv.getLocation())) {
+                return;
+            }
+            if (System.currentTimeMillis() - DeepStoragePlus.recentDSUCalls.get(inv.getLocation()) < 200) {
+                return;
+            }
+
+            DeepStoragePlus.recentDSUCalls.put(inv.getLocation(), System.currentTimeMillis());
+
+            refreshDisplayItems(inv);
+
+            for (UUID key : DeepStoragePlus.stashedDSU.keySet()) {
+                if (!DeepStoragePlus.openDSU.containsKey(key) || DeepStoragePlus.openDSU.get(key) == null) {
+                    continue;
+                }
+                Inventory openInv = DeepStoragePlus.openDSU.get(key).getInventory();
+                if (Objects.equals(inv.getItem(8), openInv.getItem(8))) {
+                    sortInventory(inv);
                     return;
-                }
-                if (System.currentTimeMillis() - DeepStoragePlus.recentDSUCalls.get(inv.getLocation()) < 200) {
-                    return;
-                }
-
-                DeepStoragePlus.recentDSUCalls.put(inv.getLocation(), System.currentTimeMillis());
-
-                if (mat != null && DSUManager.getTotalTypes(inv).contains(mat)) {
-                    for (int i = 0; i < 54; i++) {
-                        if (i % 9 != 8 && i % 9 != 7) {
-                            if (inv.getItem(i) == null || inv.getItem(i).getType() == Material.AIR) {
-                                break;
-                            }
-                            if (inv.getItem(i).getType() == mat) {
-                                inv.setItem(i, createItem(inv.getItem(i).getType(), inv));
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                for (UUID key : DeepStoragePlus.stashedDSU.keySet()) {
-                    Inventory openInv = DeepStoragePlus.openDSU.get(key).getInventory();
-                    if (inv.getItem(8).equals(openInv.getItem(8))) {
-                        sortInventory(inv);
-                        return;
-                    }
                 }
             }
         }, 5L);
     }
 
     private void sortInventory(Inventory inv) {
-        ItemStack IOSettings = inv.getItem(53);
-        if (IOSettings != null && IOSettings.hasItemMeta() && IOSettings.getItemMeta().hasLore()) {
-            String sort = IOSettings.getItemMeta().getLore().get(2).replace(ChatColor.GRAY + LanguageManager.getValue("sortingby") + ": " + ChatColor.BLUE, "");
+        ItemStack ioSettings = inv.getItem(53);
+        if (ioSettings != null && ioSettings.hasItemMeta()) {
+            ItemMeta meta = ioSettings.getItemMeta();
+            if (meta != null && meta.hasLore()) {
+                List<String> lore = meta.getLore();
+                String sort = lore != null && lore.size() > 2
+                        ? lore.get(2).replace(ChatColor.GRAY + LanguageManager.getValue("sortingby") + ": " + ChatColor.BLUE, "")
+                        : LanguageManager.getValue("container");
 
-            if (sort.equals(LanguageManager.getValue("container"))) {
-                clearItems(inv);
-                addNewItems(inv);
-            } else if (sort.equals(LanguageManager.getValue("amount"))) {
-                clearItems(inv);
-                Map<Material, Double> data = new HashMap<>();
-                List<Material> mats = getMats(inv);
-                for (Material m : mats) {
-                    data.put(m, (double) DSUManager.getTotalMaterialAmount(inv, m));
-                }
-                int dataAmount = data.keySet().size();
-                for (int i = 0; i < dataAmount; i++) {
-                    double top = 0;
-                    Material topMat = Material.AIR;
-                    for (Material m : data.keySet()) {
-                        if ((data.get(m) > top)) {
-                            topMat = m;
-                            top = data.get(m);
-                        }
+                if (sort.equals(LanguageManager.getValue("container"))) {
+                    clearItems(inv);
+                    addNewItems(inv);
+                } else if (sort.equals(LanguageManager.getValue("amount"))) {
+                    clearItems(inv);
+                    Map<ItemStack, Double> data = new HashMap<>();
+                    List<ItemStack> templates = getTemplates(inv);
+                    for (ItemStack template : templates) {
+                        data.put(template, (double) DSUManager.getTotalItemAmount(inv, template));
                     }
-                    inv.addItem(createItem(topMat, inv));
-                    data.remove(topMat);
-                }
-            } else if (sort.equalsIgnoreCase(LanguageManager.getValue("alpha"))) {
-                List<Material> mats = getMats(inv);
-                Collections.sort(mats, Comparator.comparing(Material::toString));
-                clearItems(inv);
-                for (Material m : mats) {
-                    inv.addItem(createItem(m, inv));
-                }
-            } else if (sort.equalsIgnoreCase("ID")) {
-                clearItems(inv);
+                    int dataAmount = data.size();
+                    for (int i = 0; i < dataAmount; i++) {
+                        double top = 0;
+                        ItemStack topTemplate = null;
+                        for (ItemStack template : data.keySet()) {
+                            if (data.get(template) > top) {
+                                topTemplate = template;
+                                top = data.get(template);
+                            }
+                        }
+                        inv.addItem(createItem(topTemplate, inv));
+                        data.remove(topTemplate);
+                    }
+                } else if (sort.equalsIgnoreCase(LanguageManager.getValue("alpha"))) {
+                    List<ItemStack> templates = getTemplates(inv);
+                    templates.sort(Comparator.comparing(m -> m.getItemMeta() != null && m.getItemMeta().hasDisplayName() ? ChatColor.stripColor(m.getItemMeta().getDisplayName()) : m.getType().toString()));
+                    clearItems(inv);
+                    for (ItemStack template : templates) {
+                        inv.addItem(createItem(template, inv));
+                    }
+                } else if (sort.equalsIgnoreCase("ID")) {
+                    clearItems(inv);
 
-                SortedSet<Material> list = new TreeSet<>();
-                list.addAll(DSUManager.getTotalTypes(inv));
-                for (Material m : list) {
-                    inv.addItem(createItem(m, inv));
+                    List<ItemStack> list = DSUManager.getTotalTemplates(inv).stream()
+                            .toList();
+                    for (ItemStack template : list) {
+                        inv.addItem(createItem(template, inv));
+                    }
                 }
             }
         }
@@ -116,26 +109,29 @@ public class DSUUpdateManager {
     }
 
     private static void addNewItems(Inventory inv) {
-        Set<Material> mats = DSUManager.getTotalTypes(inv);
-        for (Material m : mats) {
-            ItemStack item = new ItemStack(m);
+        Set<ItemStack> templates = DSUManager.getTotalTemplates(inv);
+        for (ItemStack template : templates) {
             boolean canAdd = true;
             for (ItemStack it : inv.getContents()) {
-                if (item.equals(it)) {
+                if (it != null && it.hasItemMeta() && template.isSimilar(it)) {
                     canAdd = false;
                     break;
                 }
             }
             if (canAdd) {
-                inv.addItem(createItem(m, inv));
+                inv.addItem(createItem(template, inv));
             }
         }
     }
 
+    private static void refreshDisplayItems(Inventory inv) {
+        clearItems(inv);
+        addNewItems(inv);
+    }
+
     private void updateInventory(Inventory inv) {
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, new Runnable() {
-            @Override
-            public void run() {
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
+            if (inv.getLocation() != null) {
                 inv.getLocation().getBlock().getState().update();
             }
         }, 1);
@@ -149,49 +145,24 @@ public class DSUUpdateManager {
         }
     }
 
-    private static List<Material> getMats(Inventory inv) {
-        Set<Material> mats = new HashSet<>();
-        for (int i = 0; i < 5; i++) {
-            ItemStack container = inv.getItem(8 + (9 * i));
-            if (container != null && container.getType() != Material.WHITE_STAINED_GLASS_PANE) {
-                HashSet<Material> tempMats = DSUManager.getTypes(container.getItemMeta().getLore());
-                mats.addAll(tempMats);
-            }
-        }
-        return new ArrayList<>(mats);
+    private static List<ItemStack> getTemplates(Inventory inv) {
+        return new ArrayList<>(DSUManager.getTotalTemplates(inv));
     }
 
-    /**
-     * Creates the display item shown in the DSU grid for a given Material.
-     * Preserves the item-model (NamespacedKey) configured for this material so
-     * resource-pack textures survive the display-item round-trip.
-     */
-    static ItemStack createItem(Material mat, Inventory inv) {
-        ItemStack item = new ItemStack(mat);
-        ItemMeta meta = item.getItemMeta();
-        meta.setLore(Arrays.asList(ChatColor.GRAY + "Item Count: " + DSUManager.getTotalMaterialAmount(inv, mat)));
 
-        // Apply configured item-model so the display item keeps its resource-pack texture.
-        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
-        if (plugin != null) {
-            String materialKey = mat.getKey().getKey(); // e.g. "stone", "iron_ingot"
-            // Check all known item-ids to see if any map to this material + have an item-model configured.
-            for (String itemId : plugin.getItemList().itemListMap.keySet()) {
-                ItemStack registered = plugin.getItemList().itemListMap.get(itemId);
-                if (registered != null && registered.getType() == mat) {
-                    String configuredModel = plugin.getConfig().getString("items." + itemId + ".item-model");
-                    if (configuredModel != null && !configuredModel.isBlank() && !configuredModel.equalsIgnoreCase("none")) {
-                        NamespacedKey modelKey = NamespacedKey.fromString(configuredModel, plugin);
-                        if (modelKey != null) {
-                            meta.setItemModel(modelKey);
-                        }
-                    }
-                    break;
-                }
+    public static ItemStack createItem(ItemStack template, Inventory inv) {
+        ItemStack item = template == null ? new ItemStack(Material.AIR) : template.clone();
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            List<String> lore = new ArrayList<>();
+            if (meta.hasLore() && meta.getLore() != null) {
+                lore.addAll(meta.getLore());
             }
+            lore.add(ChatColor.GRAY + "Item Count: " + DSUManager.getTotalItemAmount(inv, template));
+            meta.setLore(lore);
+            item.setItemMeta(meta);
         }
 
-        item.setItemMeta(meta);
         return item;
     }
 }

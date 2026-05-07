@@ -51,9 +51,12 @@ public class SettingsManager {
         /*
          * Create the IO settings item with use of the DSUinv to check for existing IO items
          */
+        ItemStack exactInput = DSUManager.getIoTemplate(IOItem, DSUManager.IO_INPUT_TEMPLATE_TAG);
         String inputLine = lore.isEmpty() ? "" : lore.getFirst();
         Material inputMaterial = stringToMat(inputLine, ChatColor.GRAY + LanguageManager.getValue("input") + ": " + ChatColor.GREEN);
-        if (inputMaterial == Material.AIR || isAllToken(inputLine)) {
+        if (exactInput != null) {
+            IOInv.setItem(8, exactInput.clone());
+        } else if (inputMaterial == Material.AIR || isAllToken(inputLine)) {
             IOInv.setItem(8, getEmptyInputSlot());
         } else {
             ItemStack newInput = getEmptyInputSlot();
@@ -67,9 +70,12 @@ public class SettingsManager {
             IOInv.setItem(8, newInput);
         }
 
+        ItemStack exactOutput = DSUManager.getIoTemplate(IOItem, DSUManager.IO_OUTPUT_TEMPLATE_TAG);
         String outputLine = lore.size() > 1 ? lore.get(1) : "";
         Material outputMaterial = stringToMat(outputLine, ChatColor.GRAY + LanguageManager.getValue("output") + ": " + ChatColor.GREEN);
-        if (outputMaterial == Material.AIR || isNoneToken(outputLine)) {
+        if (exactOutput != null) {
+            IOInv.setItem(17, exactOutput.clone());
+        } else if (outputMaterial == Material.AIR || isNoneToken(outputLine)) {
             IOInv.setItem(17, getEmptyOutputSlot());
         } else {
             ItemStack newOutput = getEmptyOutputSlot();

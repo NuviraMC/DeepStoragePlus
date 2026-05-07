@@ -5,6 +5,9 @@ range: 500
 # range is used for the maximum distance a player can be from the DSU to use the wireless terminal.
   # Set to -1 for no max distance.
 
+# Enable debug logging for DSU/Hopper events
+debug: false
+
 items:
   storage_cell_1k:
     material: STONE_AXE

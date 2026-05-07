@@ -17,13 +17,12 @@ import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.*;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
 
 import static org.bukkit.Bukkit.getLogger;
 
 public class SorterManager {
 
-    DeepStoragePlus main;
+    private final DeepStoragePlus main;
     public SorterManager(DeepStoragePlus plugin) {
         main = plugin;
     }
@@ -53,10 +52,12 @@ public class SorterManager {
     		return sorterWall;
         ItemStack border = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta bordermeta = border.getItemMeta();
-        bordermeta.setDisplayName(ChatColor.DARK_GRAY + LanguageManager.getValue("sorterwalls"));
-        bordermeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, "sorter_wall");
-        bordermeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
-        border.setItemMeta(bordermeta);
+        if (bordermeta != null) {
+            bordermeta.setDisplayName(ChatColor.DARK_GRAY + LanguageManager.getValue("sorterwalls"));
+            bordermeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, "sorter_wall");
+            bordermeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
+            border.setItemMeta(bordermeta);
+        }
 
         return sorterWall = border;
     }
@@ -67,114 +68,41 @@ public class SorterManager {
     public static ItemStack getEmptyBlock() {
         ItemStack storage = new ItemStack(Material.WHITE_STAINED_GLASS_PANE);
         ItemMeta storagemeta = storage.getItemMeta();
-        storagemeta.setDisplayName(ChatColor.YELLOW + LanguageManager.getValue("emptysorterblock"));
-        storagemeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, "sorter_empty_block");
-        storagemeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
-        storage.setItemMeta(storagemeta);
+        if (storagemeta != null) {
+            storagemeta.setDisplayName(ChatColor.YELLOW + LanguageManager.getValue("emptysorterblock"));
+            storagemeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_id"), org.bukkit.persistence.PersistentDataType.STRING, "sorter_empty_block");
+            storagemeta.getPersistentDataContainer().set(new org.bukkit.NamespacedKey(DeepStoragePlus.getInstance(), "item_group"), org.bukkit.persistence.PersistentDataType.STRING, ItemList.GROUP_SUPPORT);
+            storage.setItemMeta(storagemeta);
+        }
 
         return storage;
     }
 
 
     public static boolean sortItems(Inventory sorterInventory) {
-        Location sorterLocation = sorterInventory.getLocation();
-
-        // Get the materials we're trying to sort
-        Set<Material> materialsToSort = getMaterialsToSort(sorterInventory);
-
-        Map<Material, Set<Inventory>> containingDSUs;
-
-        // Look for a cached set of linked DSUs
-        if (DeepStoragePlus.sorterLocationCache.containsKey(sorterLocation)) {
-            Map<Material, Set<Location>> cachedDSULocations = DeepStoragePlus.sorterLocationCache.get(sorterLocation);
-            containingDSUs = new HashMap<>();
-            for (Material material: cachedDSULocations.keySet()) {
-                containingDSUs.put(material, SorterManager.getDSUInventories(cachedDSULocations.get(material)));
-            }
-            if (moveItems(sorterInventory, containingDSUs)) {
-
-                return true;
-            }
-        }
-
-        // Get all linked DSUs
-        Set<Location> locations = new HashSet(SorterManager.getLinkedLocations(sorterInventory));
+        Set<Location> locations = new HashSet<>(SorterManager.getLinkedLocations(sorterInventory));
         Set<Inventory> dsuInventories = SorterManager.getDSUInventories(locations);
-
-        // Get the DSUs that contain those materials, organized by material
-        containingDSUs = getDSUsWithMaterial(dsuInventories, materialsToSort);
-
-        // Update cache
-        updateCache(sorterLocation, containingDSUs);
-
-        return moveItems(sorterInventory, containingDSUs);
+        return moveItems(sorterInventory, dsuInventories);
     }
 
-    private static void updateCache(Location sorterLocation, Map<Material, Set<Inventory>> containingDSUs) {
-        if (DeepStoragePlus.sorterLocationCache.containsKey(sorterLocation)) {
-            Map<Material, Set<Location>> existingCache = DeepStoragePlus.sorterLocationCache.get(sorterLocation);
-            for (Material material: containingDSUs.keySet()) {
-                if (existingCache.containsKey(material)) {
-                    existingCache.get(material).addAll(containingDSUs.get(material).stream().map(Inventory::getLocation).collect(Collectors.toSet()));
-                }
-                else {
-                    existingCache.put(material, containingDSUs.get(material).stream().map(Inventory::getLocation).collect(Collectors.toSet()));
-                }
-            }
-        } else {
-            Map<Material, Set<Location>> cachedDSULocations = new HashMap<>();
-            for (Material material: containingDSUs.keySet()) {
-                cachedDSULocations.put(material, containingDSUs.get(material).stream().map(Inventory::getLocation).collect(Collectors.toSet()));
-            }
-            DeepStoragePlus.sorterLocationCache.put(sorterLocation, cachedDSULocations);
-        }
-    }
-
-    private static boolean moveItems(Inventory sorterInventory, Map<Material, Set<Inventory>> containingDSUs) {
-        // For each item and for each DSU that contains
+    private static boolean moveItems(Inventory sorterInventory, Set<Inventory> dsuInventories) {
         boolean success = true;
         for (int i = 0; i < 18; i++) {
             ItemStack item = sorterInventory.getItem(i);
-            boolean didMoveAll = false;
-            if (item != null && item.getType() != Material.AIR && StorageUtils.hasNoMeta(item)) {
-                if (containingDSUs.containsKey(item.getType())) {
-                    for (Inventory dsu : containingDSUs.get(item.getType())) { // Try to add the item to each DSU until we successfully add all of it.
-                        if (DSUManager.addToDSUSilent(item, dsu)) {
-                            didMoveAll = true;
-                            break;
-                        }
-                    }
+            if (item == null || item.getType() == Material.AIR || ItemList.isPluginItem(item)) {
+                continue;
+            }
+            ItemStack moving = item.clone();
+            for (Inventory dsu : dsuInventories) {
+                if (moving.getAmount() <= 0) {
+                    break;
                 }
+                DSUManager.addToDSUSilent(moving, dsu);
             }
-            else {
-                didMoveAll = true;
-            }
-            success = success && didMoveAll;
+            sorterInventory.setItem(i, moving.getAmount() > 0 ? moving : null);
+            success = success && moving.getAmount() <= 0;
         }
         return success;
-    }
-
-    private static Set<Material> getMaterialsToSort(Inventory sorterInventory) {
-        Set<Material> materialsToSort = new HashSet<>();
-        for (int i = 0; i < 18; i++) { // Get each unique item type we're trying to sort
-            ItemStack item = sorterInventory.getItem(i);
-            if (item != null && StorageUtils.hasNoMeta(item)) {
-                materialsToSort.add(item.getType());
-            }
-        }
-        return materialsToSort;
-    }
-
-    private static Map<Material, Set<Inventory>> getDSUsWithMaterial(Set<Inventory> dsuInventories, Set<Material> materials) {
-        // Get the DSUs that contain those materials
-        Map<Material, Set<Inventory>> containingDSUs = new HashMap<>();
-        for (Material material : materials) {
-            if (!containingDSUs.containsKey(material)) {
-                containingDSUs.put(material, new HashSet<>());
-            }
-            containingDSUs.get(material).addAll(SorterManager.getDSUContainingMaterial(dsuInventories, material));
-        }
-        return containingDSUs;
     }
 
     /**
@@ -204,17 +132,22 @@ public class SorterManager {
         for (int i = 27; i < 54; i++) {
             ItemStack item = inv.getItem(i);
             if (item != null) { // Only link modules should be possible in these slots
-                getLinkModuleLocation(item).ifPresent(x -> {if (!locations.contains(x)) newLocations.add(x);});
+                getLinkModuleLocation(item).ifPresent(x -> {
+                    if (!locations.contains(x)) {
+                        newLocations.add(x);
+                    }
+                });
             }
         }
         return newLocations;
     }
 
     private static Optional<Location> getLinkModuleLocation(ItemStack linkModule) {
-        if (ItemList.isItem(linkModule, ItemList.KEY_LINK_MODULE)
-                && linkModule.getItemMeta().hasLore() && linkModule.getItemMeta().getLore().size() > 0) {
+        ItemMeta meta = linkModule != null ? linkModule.getItemMeta() : null;
+        List<String> lore = meta != null ? meta.getLore() : null;
+        if (ItemList.isItem(linkModule, ItemList.KEY_LINK_MODULE) && lore != null && !lore.isEmpty()) {
             try {
-                String[] loreLocationArr = ChatColor.stripColor(linkModule.getItemMeta().getLore().get(0)).split("\\s+");
+                String[] loreLocationArr = ChatColor.stripColor(lore.get(0)).split("\\s+");
                 if (loreLocationArr.length == 4) {
                     return Optional.of(new Location(
                             Bukkit.getWorld(loreLocationArr[0]),
@@ -225,7 +158,7 @@ public class SorterManager {
                 }
             }
             catch (Exception ignored) {
-                getLogger().log(Level.INFO, "Exception parsing link module lore " + linkModule.getItemMeta().getLore().get(0));
+                getLogger().log(Level.INFO, "Exception parsing link module lore " + lore.get(0));
             }
         }
         return Optional.empty();
@@ -247,16 +180,4 @@ public class SorterManager {
         return inventories;
     }
 
-    /**
-     * Returns an optional inventory that contains the given material.
-     */
-    public static Set<Inventory> getDSUContainingMaterial(Set<Inventory> inventories, Material material) {
-        Set<Inventory> DSUs = new HashSet<>();
-        for (Inventory inventory: inventories) {
-            if (DSUManager.dsuContainsType(inventory, material)) {
-                DSUs.add(inventory);
-            }
-        }
-        return DSUs;
-    }
 }
