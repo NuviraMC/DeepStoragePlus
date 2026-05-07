@@ -99,7 +99,6 @@ public class InventoryListener implements Listener {
 
     @EventHandler
     private void onStorageInteract(InventoryClickEvent event) {
-        // --- Aufgeräumte Cancel-Logik und Kommentare ---
         if (event.getClickedInventory() == null) return;
         if (!(event.getWhoClicked() instanceof Player player)) return;
 
@@ -233,10 +232,12 @@ public class InventoryListener implements Listener {
                 } else {
                     event.setCancelled(true);
                     if (cursor != null && cursor.getType() != Material.AIR) {
-                        boolean isvaliditem = DSUManager.addToDSU(cursor, event.getClickedInventory(), player);
-                        player.setItemOnCursor(cursor);
+                        // FIX: Clone benutzen damit Bukkit den Cursor-State nicht ueberschreibt
+                        ItemStack cursorClone = cursor.clone();
+                        boolean isvaliditem = DSUManager.addToDSU(cursorClone, event.getClickedInventory(), player);
+                        player.setItemOnCursor(cursorClone);
                         main.dsuupdatemanager.updateItemsExact(inv);
-                        if (cursor.getAmount() > 0 && isvaliditem) {
+                        if (cursorClone.getAmount() > 0 && isvaliditem) {
                             player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("containersfull"));
                         }
                     } else if ((cursor == null || cursor.getType() == Material.AIR) && item != null) {
@@ -263,8 +264,11 @@ public class InventoryListener implements Listener {
             } else {
                 if (event.isShiftClick()) {
                     if (item != null && item.getType() != Material.AIR) {
-                        main.dsumanager.addItemToDSU(item, player);
+                        // FIX: setCancelled VOR addItemToDSU, dann Restmenge zurueckschreiben
                         event.setCancelled(true);
+                        ItemStack clone = item.clone();
+                        main.dsumanager.addItemToDSU(clone, player);
+                        item.setAmount(clone.getAmount());
                     }
                 } else if (event.getClick() == ClickType.DOUBLE_CLICK) {
                     event.setCancelled(true);
@@ -289,7 +293,7 @@ public class InventoryListener implements Listener {
             return;
         }
 
-        // Standard: keine Einschränkung
+        // Standard: keine Einschraenkung
     }
 
     @EventHandler
@@ -474,20 +478,9 @@ public class InventoryListener implements Listener {
             return;
         }
 
-        // DSU -> Hopper (Entnahme)
+        // FIX: DSU -> Hopper (Entnahme) wird vollstaendig durch den IOListener geregelt.
+        // Hier immer canceln, damit nur konfigurierte IO-Settings Items ausgeben koennen.
         if (source.getSize() == 54 && StorageUtils.isDSU(source)) {
-            ItemStack template = DSUManager.getTotalTemplates(source).stream().findFirst().orElse(null);
-            if (template == null) {
-                return;
-            }
-
-            ItemStack toGive = template.clone();
-            toGive.setAmount(1);
-            if (destination.addItem(toGive).isEmpty()) {
-                DSUManager.takeItems(template, source, 1);
-                main.dsuupdatemanager.updateItemsExact(source);
-            }
-
             event.setCancelled(true);
         }
     }
