@@ -21,6 +21,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.*;
+import java.util.logging.Logger;
 
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.*;
 
@@ -29,6 +30,18 @@ public class DSUManager {
     private final DeepStoragePlus main;
     public DSUManager(DeepStoragePlus plugin) {
         main = plugin;
+    }
+
+    private static boolean isDebug() {
+        DeepStoragePlus inst = DeepStoragePlus.getInstance();
+        return inst != null && inst.getConfig().getBoolean("debug", false);
+    }
+
+    private static void debug(String msg) {
+        if (isDebug()) {
+            DeepStoragePlus inst = DeepStoragePlus.getInstance();
+            if (inst != null) inst.getLogger().info("[DSU STORAGE DEBUG] " + msg);
+        }
     }
 
     /*
@@ -383,6 +396,7 @@ public class DSUManager {
             ItemMeta meta = container.getItemMeta();
             List<String> lore = meta != null ? meta.getLore() : null;
             if (lore == null) {
+                debug("countStorage: lore is null for container " + container.getType());
                 return 0;
             }
             for (String l : lore) {
@@ -392,6 +406,7 @@ public class DSUManager {
                     spaceTotal += getMaxData(data);
                 }
             }
+            debug("countStorage: typeString='" + typeString + "' spaceTotal=" + spaceTotal + " spaceCur=" + spaceCur + " remaining=" + (spaceTotal - spaceCur));
         }
         return spaceTotal - spaceCur;
     }
@@ -442,22 +457,31 @@ public class DSUManager {
      */
     public static void addDataToContainer(ItemStack container, ItemStack item) {
         if (container == null || item == null) {
+            debug("addDataToContainer: container or item is null");
             return;
         }
-        if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) return;
+        if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
+            debug("addDataToContainer: container is not a storage_container group. Type=" + container.getType() + " group=" + ItemList.getItemGroup(container));
+            return;
+        }
 
         int amount = item.getAmount();
         String storageKey = LanguageManager.getValue("currentstorage") + ": ";
         int storage = countStorage(container, storageKey);
         int canAdd = Math.min(storage, amount);
+        debug("addDataToContainer: item=" + item.getType() + " amount=" + amount + " storageKey='" + storageKey + "' availableStorage=" + storage + " canAdd=" + canAdd);
         if (canAdd <= 0) {
+            debug("addDataToContainer: canAdd<=0, skipping");
             return;
         }
 
         int slot = findMatchingSlot(container, item);
+        debug("addDataToContainer: findMatchingSlot returned " + slot);
         if (slot < 0) {
             slot = findEmptySlot(container);
+            debug("addDataToContainer: findEmptySlot returned " + slot);
             if (slot < 0) {
+                debug("addDataToContainer: no empty slot found, container full");
                 return;
             }
             setStoredTemplate(container, slot, item.clone());
@@ -467,6 +491,7 @@ public class DSUManager {
         int current = getStoredAmount(container, slot);
         setStoredAmount(container, slot, current + canAdd);
         item.setAmount(amount - canAdd);
+        debug("addDataToContainer: stored " + canAdd + " items (slot=" + slot + "), remaining=" + item.getAmount());
         rewriteContainerLore(container);
     }
 
@@ -474,17 +499,25 @@ public class DSUManager {
     This method loops until the item trying to be added is either done being added, or the containers run out of memory.
      */
     public static boolean addToDSU(ItemStack toAdd, Inventory inv, Player player) {
-        if (toAdd == null || inv == null || player == null || ItemList.isPluginItem(toAdd)) {
+        if (toAdd == null || inv == null || player == null) {
+            debug("addToDSU: null argument (toAdd=" + toAdd + " inv=" + inv + " player=" + player + ")");
             return false;
         }
+        if (ItemList.isPluginItem(toAdd)) {
+            debug("addToDSU: item is a plugin item (item_id=" + ItemList.getItemId(toAdd) + "), refusing to add");
+            return false;
+        }
+        debug("addToDSU: adding " + toAdd.getType() + " x" + toAdd.getAmount() + " to DSU (invSize=" + inv.getSize() + ")");
         for (int i = 0; i < 5; i++) {
             if (toAdd.getAmount() <= 0) break;
             int containerSlot = 8 + (9 * i);
             ItemStack container = inv.getItem(containerSlot);
+            debug("addToDSU: checking slot " + containerSlot + " -> " + (container != null ? container.getType() + " group=" + ItemList.getItemGroup(container) : "null"));
             if (container == null) continue;
             addDataToContainer(container, toAdd);
             inv.setItem(containerSlot, container);
         }
+        debug("addToDSU: done, remaining=" + toAdd.getAmount());
         return toAdd.getAmount() <= 0;
     }
 
