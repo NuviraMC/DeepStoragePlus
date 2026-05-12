@@ -40,10 +40,6 @@ public class InventoryListener implements Listener {
         this.main = plugin;
     }
 
-    /**
-     * Baut ein sauberes ItemStack zum Zurueckgeben an den Spieler.
-     * Entfernt nur die DSU-Anzeige-Lore ("Item Count: x"), behaelt alles andere.
-     */
     private static ItemStack buildTakeItem(ItemStack template, int amount, Inventory dsuInv) {
         ItemStack display = DSUUpdateManager.createItem(template, dsuInv);
         ItemMeta meta = display.getItemMeta();
@@ -64,11 +60,6 @@ public class InventoryListener implements Listener {
         return display;
     }
 
-    /**
-     * Bereinigt das GUI-Display-Item zu einem Template, das isSimilar() gegen
-     * die intern gespeicherten Items korrekt matcht (entfernt Item-Count-Lore,
-     * setzt Amount auf 1).
-     */
     private static ItemStack buildTakeTemplate(ItemStack displayItem) {
         if (displayItem == null || displayItem.getType() == Material.AIR) {
             return null;
@@ -265,7 +256,6 @@ public class InventoryListener implements Listener {
                         }
                     } else if ((cursor == null || cursor.getType() == Material.AIR) && item != null) {
                         if (event.getClick() != ClickType.DOUBLE_CLICK) {
-                            // Bereinigtes Template fuer korrekte isSimilar()-Matches in takeItems()
                             ItemStack takeTemplate = buildTakeTemplate(item);
                             if (takeTemplate == null || takeTemplate.getType() == Material.AIR) {
                                 return;
@@ -280,7 +270,6 @@ public class InventoryListener implements Listener {
                                 if (amtTaken > 0) {
                                     ItemStack toGive = buildTakeItem(takeTemplate, amtTaken, inv);
                                     Map<Integer, ItemStack> leftover = player.getInventory().addItem(toGive);
-                                    // Restmenge die nicht ins Inventar passt sauber zurueck ins DSU
                                     if (!leftover.isEmpty()) {
                                         for (ItemStack rest : leftover.values()) {
                                             DSUManager.addToDSUSilent(rest, inv);
@@ -305,7 +294,6 @@ public class InventoryListener implements Listener {
                         event.setCancelled(true);
                         ItemStack clone = item.clone();
                         main.dsumanager.addItemToDSU(clone, player);
-                        // Restmenge direkt in den Slot schreiben (item.setAmount() nach setCancelled() unzuverlaessig)
                         if (clone.getAmount() > 0) {
                             event.getClickedInventory().setItem(event.getSlot(), clone);
                         } else {
@@ -479,62 +467,8 @@ public class InventoryListener implements Listener {
         }, 1L, 5L);
     }
 
-    @EventHandler
-    public void onInventoryMoveItem(InventoryMoveItemEvent event) {
-        if (event.isCancelled()) {
-            return;
-        }
-
-        Inventory source = event.getSource();
-        Inventory destination = event.getDestination();
-        ItemStack item = event.getItem();
-
-        debug("Hopper move: from=" + source.getType()
-                + ", to=" + destination.getType()
-                + ", item=" + (item != null ? item.getType() : "null")
-                + ", amount=" + (item != null ? item.getAmount() : 0)
-                + ", srcIsDSU=" + StorageUtils.isDSU(source)
-                + ", dstIsDSU=" + StorageUtils.isDSU(destination));
-
-        if (destination.getSize() == 54 && StorageUtils.isDSU(destination)) {
-            ItemStack moving = item.clone();
-            int before = moving.getAmount();
-            DSUManager.addToDSUSilent(moving, destination);
-            int moved = before - moving.getAmount();
-            if (moved <= 0) {
-                return;
-            }
-            event.setCancelled(true);
-            removeFromInventory(source, item, moved);
-            main.dsuupdatemanager.updateItemsExact(destination);
-            return;
-        }
-
-        if (source.getSize() == 54 && StorageUtils.isDSU(source)) {
-            event.setCancelled(true);
-        }
-    }
-
-    private void removeFromInventory(Inventory inventory, ItemStack template, int amount) {
-        if (inventory == null || template == null || amount <= 0) {
-            return;
-        }
-        int remaining = amount;
-        ItemStack[] contents = inventory.getContents();
-        for (int i = 0; i < contents.length && remaining > 0; i++) {
-            ItemStack stack = contents[i];
-            if (stack == null || !stack.isSimilar(template)) {
-                continue;
-            }
-            int take = Math.min(remaining, stack.getAmount());
-            stack.setAmount(stack.getAmount() - take);
-            if (stack.getAmount() <= 0) {
-                contents[i] = null;
-            }
-            remaining -= take;
-        }
-        inventory.setContents(contents);
-    }
+    // NOTE: InventoryMoveItemEvent for DSU hoppers is handled exclusively
+    // by IOListener. No handler here to avoid conflicts.
 
     private boolean isDebug() {
         return main.getConfig().getBoolean(DEBUG_KEY, false);
