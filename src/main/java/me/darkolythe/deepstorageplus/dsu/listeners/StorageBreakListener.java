@@ -22,76 +22,75 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.getLock
 public class StorageBreakListener implements Listener {
 
     DeepStoragePlus main;
+
     public StorageBreakListener(DeepStoragePlus plugin) {
         main = plugin;
     }
 
-    @EventHandler (priority = EventPriority.HIGHEST)
+    @EventHandler(priority = EventPriority.HIGHEST)
     private void onStorageBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
-        if (!event.isCancelled()) {
-            if (event.getBlock().getState() instanceof Container) {
-                Container chest = (Container) event.getBlock().getState();
-                if (chest.getInventory().contains(DSUManager.getDSUWall()) || chest.getInventory().contains(SorterManager.getSorterWall())) {
+        if (event.isCancelled()) return;
 
-                    ItemStack lock = chest.getInventory().getItem(53);
-                    boolean isOp = player.hasPermission("deepstorageplus.adminopen");
-                    boolean canOpen = getLocked(lock, player);
-                    if (canOpen || isOp || getLockedUsers(lock).size() == 0) {
+        if (!(event.getBlock().getState() instanceof Container chest)) return;
 
-                        DoubleChest doublechest = (DoubleChest) chest.getInventory().getHolder();
-                        event.setCancelled(true);
-
-                        Container chestLeft = (Container) doublechest.getLeftSide();
-                        Container chestRight = (Container) doublechest.getRightSide();
-
-                        removeItems(chestLeft);
-                        removeItems(chestRight);
-                        event.setDropItems(false);
-                    } else {
-                        event.setCancelled(true);
-                    }
-                }
-            }
+        if (!chest.getInventory().contains(DSUManager.getDSUWall())
+                && !chest.getInventory().contains(SorterManager.getSorterWall())) {
+            return;
         }
+
+        ItemStack lock = chest.getInventory().getItem(53);
+        boolean isOp = player.hasPermission("deepstorageplus.adminopen");
+        boolean canOpen = getLocked(lock, player);
+
+        if (!canOpen && !isOp && getLockedUsers(lock).size() != 0) {
+            event.setCancelled(true);
+            return;
+        }
+
+        DoubleChest doublechest = (DoubleChest) chest.getInventory().getHolder();
+        event.setCancelled(true);
+        event.setDropItems(false);
+
+        Container chestLeft = (Container) doublechest.getLeftSide();
+        Container chestRight = (Container) doublechest.getRightSide();
+
+        removeItems(chestLeft);
+        removeItems(chestRight);
     }
 
     private void breakStorage(Container chest) {
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, new Runnable() {
-            @Override
-            public void run() {
-                chest.getWorld().getBlockAt(chest.getLocation()).setType(Material.AIR);
-            }
-        }, 1);
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () ->
+                chest.getWorld().getBlockAt(chest.getLocation()).setType(Material.AIR), 1);
         chest.getWorld().dropItemNaturally(chest.getLocation(), new ItemStack(Material.CHEST, 1));
     }
 
     private void removeItems(Container chest) {
         chest.setCustomName(null);
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, new Runnable() {
-            @Override
-            public void run() {
-                emptyChest(chest);
-            }
-        }, 1);
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> emptyChest(chest), 1);
         breakStorage(chest);
     }
 
+    /**
+     * Leert die Truhe beim Abbauen:
+     * - Nur echte User-Items (keine Plugin-Items) werden gedroppt
+     * - DSP-interne Items (Walls, Storage Containers, Lock, IO-Settings, etc.)
+     *   werden einfach entfernt und NICHT gedroppt
+     * - Der Storage Wrench bzw. Sorter Wrench wird NICHT als Drop gegeben,
+     *   weil der DSU/Sorter schon als 2x Chest droppt
+     */
     private static void emptyChest(Container chest) {
-        if (StorageUtils.isSorter(chest.getInventory())) {
-            chest.getInventory().addItem(ItemList.createSorterWrench());
-        } else if (StorageUtils.isDSU(chest.getInventory())) {
-            chest.getInventory().addItem(ItemList.createStorageWrench());
-        }
         for (int i = 0; i < chest.getInventory().getContents().length; i++) {
             ItemStack item = chest.getInventory().getItem(i);
-            if (item != null) {
-                if (!ItemList.isPluginItem(item)) {
-                    chest.getInventory().setItem(i, null);
-                } else {
-                    chest.getWorld().dropItemNaturally(chest.getLocation(), item);
-                    chest.getInventory().setItem(i, null);
-                }
+            if (item == null || item.getType() == org.bukkit.Material.AIR) continue;
+
+            if (ItemList.isPluginItem(item)) {
+                // DSP-internes Item: einfach loeschen, nicht droppen
+                chest.getInventory().setItem(i, null);
+            } else {
+                // Echter User-Content: droppen
+                chest.getWorld().dropItemNaturally(chest.getLocation(), item);
+                chest.getInventory().setItem(i, null);
             }
         }
     }

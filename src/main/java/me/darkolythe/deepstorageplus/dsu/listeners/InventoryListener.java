@@ -40,21 +40,18 @@ public class InventoryListener implements Listener {
         this.main = plugin;
     }
 
-    // ---------------------------------------------------------------------------
-    // Helper: build a proper ItemStack to give back to the player after taking
-    // items out of the DSU. Preserves original item properties and removes only
-    // the "Item Count: x" lore added for DSU display.
-    // ---------------------------------------------------------------------------
+    /**
+     * Baut ein sauberes ItemStack zum Zurueckgeben an den Spieler.
+     * Entfernt nur die DSU-Anzeige-Lore ("Item Count: x"), behaelt alles andere.
+     */
     private static ItemStack buildTakeItem(ItemStack template, int amount, Inventory dsuInv) {
         ItemStack display = DSUUpdateManager.createItem(template, dsuInv);
         ItemMeta meta = display.getItemMeta();
         if (meta != null && meta.hasLore()) {
             List<String> originalLore = meta.getLore();
             if (originalLore != null) {
-                // Create a new mutable list (meta.getLore() returns immutable list)
                 List<String> newLore = new ArrayList<>(originalLore);
-                // Remove only the "Item Count: x" lore line, keep everything else
-                newLore.removeIf(line -> line.contains("Item Count: "));
+                newLore.removeIf(line -> ChatColor.stripColor(line).startsWith("Item Count:"));
                 if (newLore.isEmpty()) {
                     meta.setLore(null);
                 } else {
@@ -65,6 +62,34 @@ public class InventoryListener implements Listener {
         }
         display.setAmount(amount);
         return display;
+    }
+
+    /**
+     * Bereinigt das GUI-Display-Item zu einem Template, das isSimilar() gegen
+     * die intern gespeicherten Items korrekt matcht (entfernt Item-Count-Lore,
+     * setzt Amount auf 1).
+     */
+    private static ItemStack buildTakeTemplate(ItemStack displayItem) {
+        if (displayItem == null || displayItem.getType() == Material.AIR) {
+            return null;
+        }
+        ItemStack template = displayItem.clone();
+        ItemMeta meta = template.getItemMeta();
+        if (meta != null && meta.hasLore()) {
+            List<String> lore = meta.getLore();
+            if (lore != null) {
+                List<String> newLore = new ArrayList<>(lore);
+                newLore.removeIf(line -> ChatColor.stripColor(line).startsWith("Item Count:"));
+                if (newLore.isEmpty()) {
+                    meta.setLore(null);
+                } else {
+                    meta.setLore(newLore);
+                }
+                template.setItemMeta(meta);
+            }
+        }
+        template.setAmount(1);
+        return template;
     }
 
     @EventHandler
@@ -88,8 +113,7 @@ public class InventoryListener implements Listener {
                     }
                     player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("notallowedtoopen"));
                     event.setCancelled(true);
-                }
-                else if (event.getView().getTitle().equals(DeepStoragePlus.sortername) || StorageUtils.isSorter(event.getInventory())) {
+                } else if (event.getView().getTitle().equals(DeepStoragePlus.sortername) || StorageUtils.isSorter(event.getInventory())) {
                     SorterManager.verifyInventory(event.getInventory(), player);
                     main.sorterUpdateManager.sortItems(event.getInventory(), DeepStoragePlus.minTimeSinceLastSortPlayer);
                 }
@@ -107,7 +131,6 @@ public class InventoryListener implements Listener {
         ItemStack cursor = event.getCursor();
         String ioConfigTitle = ChatColor.BLUE + "" + ChatColor.BOLD + LanguageManager.getValue("dsuioconfig");
 
-        // IO-Konfigurationsfenster: gezielte Auswahl erlauben
         if (event.getView().getTitle().equals(ioConfigTitle)) {
             debug("IO config click: slot=" + event.getSlot() + ", click=" + event.getClick());
             event.setCancelled(true);
@@ -195,6 +218,7 @@ public class InventoryListener implements Listener {
                     + ", topInv=" + (event.getClickedInventory() == inv)
                     + ", item=" + (item != null ? item.getType() : "null")
                     + ", cursor=" + (cursor != null ? cursor.getType() : "null"));
+
             if (event.getClickedInventory() != player.getInventory()) {
                 if (event.getSlot() % 9 == 8) {
                     if (event.getSlot() != 53) {
@@ -232,7 +256,6 @@ public class InventoryListener implements Listener {
                 } else {
                     event.setCancelled(true);
                     if (cursor != null && cursor.getType() != Material.AIR) {
-                        // FIX: Clone benutzen damit Bukkit den Cursor-State nicht ueberschreibt
                         ItemStack cursorClone = cursor.clone();
                         boolean isvaliditem = DSUManager.addToDSU(cursorClone, event.getClickedInventory(), player);
                         player.setItemOnCursor(cursorClone);
@@ -242,22 +265,37 @@ public class InventoryListener implements Listener {
                         }
                     } else if ((cursor == null || cursor.getType() == Material.AIR) && item != null) {
                         if (event.getClick() != ClickType.DOUBLE_CLICK) {
+                            // Bereinigtes Template fuer korrekte isSimilar()-Matches in takeItems()
+                            ItemStack takeTemplate = buildTakeTemplate(item);
+                            if (takeTemplate == null || takeTemplate.getType() == Material.AIR) {
+                                return;
+                            }
+
+                            int requestedAmount = event.getClick() == ClickType.RIGHT
+                                    ? 1
+                                    : takeTemplate.getMaxStackSize();
+
                             if (event.isShiftClick()) {
-                                if (player.getInventory().firstEmpty() != -1) {
-                                    int amtTaken = DSUManager.takeItems(item, inv, item != null ? item.getMaxStackSize() : 64);
-                                    if (amtTaken > 0) {
-                                        player.getInventory().addItem(buildTakeItem(item, amtTaken, inv));
+                                int amtTaken = DSUManager.takeItems(takeTemplate, inv, requestedAmount);
+                                if (amtTaken > 0) {
+                                    ItemStack toGive = buildTakeItem(takeTemplate, amtTaken, inv);
+                                    Map<Integer, ItemStack> leftover = player.getInventory().addItem(toGive);
+                                    // Restmenge die nicht ins Inventar passt sauber zurueck ins DSU
+                                    if (!leftover.isEmpty()) {
+                                        for (ItemStack rest : leftover.values()) {
+                                            DSUManager.addToDSUSilent(rest, inv);
+                                        }
+                                        player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("nomorespace"));
                                     }
-                                } else {
-                                    player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("nomorespace"));
                                 }
                             } else {
-                                int amtTaken = DSUManager.takeItems(item, inv, item != null ? item.getMaxStackSize() : 64);
+                                int amtTaken = DSUManager.takeItems(takeTemplate, inv, requestedAmount);
                                 if (amtTaken > 0) {
-                                    player.setItemOnCursor(buildTakeItem(item, amtTaken, inv));
+                                    player.setItemOnCursor(buildTakeItem(takeTemplate, amtTaken, inv));
                                 }
                             }
                             main.dsuupdatemanager.updateItemsExact(inv);
+                            player.updateInventory();
                         }
                     }
                 }
@@ -267,7 +305,7 @@ public class InventoryListener implements Listener {
                         event.setCancelled(true);
                         ItemStack clone = item.clone();
                         main.dsumanager.addItemToDSU(clone, player);
-                        // Restmenge direkt in den Slot zurueckschreiben, da item.setAmount() nach setCancelled() nicht zuverl. funktioniert
+                        // Restmenge direkt in den Slot schreiben (item.setAmount() nach setCancelled() unzuverlaessig)
                         if (clone.getAmount() > 0) {
                             event.getClickedInventory().setItem(event.getSlot(), clone);
                         } else {
@@ -281,7 +319,6 @@ public class InventoryListener implements Listener {
             return;
         }
 
-        // Sorter-Inventar: Funktions-Slots blockieren
         if (event.getView().getTitle().equals(DeepStoragePlus.sortername) || StorageUtils.isSorter(inv)) {
             if (event.getClickedInventory() != player.getInventory()) {
                 int slot = event.getSlot();
@@ -290,23 +327,18 @@ public class InventoryListener implements Listener {
                     return;
                 }
             }
-            // Shift-Klick im Sorter: Sortieren
             if (event.isShiftClick() && item != null && item.getType() != Material.AIR) {
                 main.sorterUpdateManager.sortItems(inv, DeepStoragePlus.minTimeSinceLastSortPlayer);
             }
             return;
         }
-
-        // Standard: keine Einschraenkung
     }
 
     @EventHandler
     private void onInventoryDrag(InventoryDragEvent event) {
-        // Nur Funktions-Slots im DSU blockieren, Rest erlauben
         if (event.getView().getTitle().equals(DeepStoragePlus.DSUname) || StorageUtils.isDSU(event.getInventory())) {
             if (event.getWhoClicked() instanceof Player) {
                 for (Integer slot : event.getRawSlots()) {
-                    // Rechte Randspalte und Funktions-Slots blockieren
                     if (slot % 9 == 8 || slot % 9 == 7 || slot == 53) {
                         event.setCancelled(true);
                         break;
@@ -424,10 +456,8 @@ public class InventoryListener implements Listener {
                 lock.setItemMeta(meta);
                 openIO.setItem(53, lock);
             }
-
             DeepStoragePlus.gettingInput.put(player.getUniqueId(), false);
             DeepStoragePlus.openIOInv.put(player.getUniqueId(), true);
-
             event.setCancelled(true);
         }
     }
@@ -466,7 +496,6 @@ public class InventoryListener implements Listener {
                 + ", srcIsDSU=" + StorageUtils.isDSU(source)
                 + ", dstIsDSU=" + StorageUtils.isDSU(destination));
 
-        // Hopper -> DSU (Einlagern)
         if (destination.getSize() == 54 && StorageUtils.isDSU(destination)) {
             ItemStack moving = item.clone();
             int before = moving.getAmount();
@@ -475,15 +504,12 @@ public class InventoryListener implements Listener {
             if (moved <= 0) {
                 return;
             }
-
             event.setCancelled(true);
             removeFromInventory(source, item, moved);
             main.dsuupdatemanager.updateItemsExact(destination);
             return;
         }
 
-        // FIX: DSU -> Hopper (Entnahme) wird vollstaendig durch den IOListener geregelt.
-        // Hier immer canceln, damit nur konfigurierte IO-Settings Items ausgeben koennen.
         if (source.getSize() == 54 && StorageUtils.isDSU(source)) {
             event.setCancelled(true);
         }
