@@ -14,6 +14,7 @@ import org.bukkit.Material;
 import org.bukkit.block.Container;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
@@ -112,7 +113,7 @@ public class InventoryListener implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     private void onStorageInteract(InventoryClickEvent event) {
         if (event.getClickedInventory() == null) return;
         if (!(event.getWhoClicked() instanceof Player player)) return;
