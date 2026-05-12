@@ -264,11 +264,15 @@ public class InventoryListener implements Listener {
             } else {
                 if (event.isShiftClick()) {
                     if (item != null && item.getType() != Material.AIR) {
-                        // FIX: setCancelled VOR addItemToDSU, dann Restmenge zurueckschreiben
                         event.setCancelled(true);
                         ItemStack clone = item.clone();
                         main.dsumanager.addItemToDSU(clone, player);
-                        item.setAmount(clone.getAmount());
+                        // Restmenge direkt in den Slot zurueckschreiben, da item.setAmount() nach setCancelled() nicht zuverl. funktioniert
+                        if (clone.getAmount() > 0) {
+                            event.getClickedInventory().setItem(event.getSlot(), clone);
+                        } else {
+                            event.getClickedInventory().setItem(event.getSlot(), null);
+                        }
                     }
                 } else if (event.getClick() == ClickType.DOUBLE_CLICK) {
                     event.setCancelled(true);
