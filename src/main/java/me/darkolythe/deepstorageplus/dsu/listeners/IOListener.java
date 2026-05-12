@@ -63,11 +63,10 @@ public class IOListener implements Listener {
     }
 
     /**
-     * Vanilla hopper system for DSU:
-     * - Let Minecraft handle item movement normally.
-     * - Only block movement into/from protected slots (col 7 & 8 = right two columns)
-     *   and prevent plugin items (with custom meta) from being siphoned out.
-     * - After a successful vanilla move into DSU, just refresh the display.
+     * Vanilla hopper behaviour for DSU:
+     * - Block plugin/meta items (storage containers, IO settings, etc.) from being moved
+     * - For INPUT: only allow into safe slots (not col 7 or col 8)
+     * - For OUTPUT: allow vanilla pull, just not plugin items (already covered above)
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onHopperMove(InventoryMoveItemEvent event) {
@@ -79,53 +78,36 @@ public class IOListener implements Listener {
 
         if (!dsuIsSource && !dsuIsDest) return;
 
-        ItemStack item = event.getItem();
-
-        // Never move plugin/meta items (storage containers, IO settings, etc.)
-        if (!hasNoMeta(item)) {
+        // Never move plugin/meta items in either direction
+        if (!hasNoMeta(event.getItem())) {
             event.setCancelled(true);
             return;
         }
 
-        // Block anything being pulled OUT of a DSU via hopper (Minecraft would
-        // pull from any reachable slot including col 7/8 display slots).
-        // We cancel output entirely — hopper output is not supported without IO config.
-        if (dsuIsSource) {
+        if (dsuIsDest) {
+            // INPUT: vanilla would push into any slot including col 7/8 — handle ourselves
             event.setCancelled(true);
-            return;
-        }
-
-        // dsuIsDest: vanilla will push the item into the first available slot.
-        // Vanilla only picks slots 0-53 in order, but our col 7 & 8 slots must
-        // stay protected. Cancel and do it ourselves into only the safe slots.
-        event.setCancelled(true);
-
-        // Find the first non-protected slot that can accept this item
-        for (int i = 0; i < dest.getSize(); i++) {
-            // Skip col 7 and col 8 (display/container/settings columns)
-            if (i % 9 == 7 || i % 9 == 8) continue;
-
-            ItemStack slot = dest.getItem(i);
-            if (slot == null || slot.getType() == Material.AIR) {
-                dest.setItem(i, item.clone());
-                removeOneFrom(source, item);
-                main.dsuupdatemanager.updateItemsExact(dest);
-                return;
-            }
-            if (slot.isSimilar(item) && slot.getAmount() < slot.getMaxStackSize()) {
-                int space = slot.getMaxStackSize() - slot.getAmount();
-                int toAdd = Math.min(space, item.getAmount());
-                slot.setAmount(slot.getAmount() + toAdd);
-                dest.setItem(i, slot);
-                removeAmountFrom(source, item, toAdd);
-                main.dsuupdatemanager.updateItemsExact(dest);
-                return;
+            ItemStack item = event.getItem();
+            for (int i = 0; i < dest.getSize(); i++) {
+                if (i % 9 == 7 || i % 9 == 8) continue; // protected columns
+                ItemStack slot = dest.getItem(i);
+                if (slot == null || slot.getType() == Material.AIR) {
+                    dest.setItem(i, item.clone());
+                    removeAmountFrom(source, item, item.getAmount());
+                    main.dsuupdatemanager.updateItemsExact(dest);
+                    return;
+                }
+                if (slot.isSimilar(item) && slot.getAmount() < slot.getMaxStackSize()) {
+                    int toAdd = Math.min(slot.getMaxStackSize() - slot.getAmount(), item.getAmount());
+                    slot.setAmount(slot.getAmount() + toAdd);
+                    dest.setItem(i, slot);
+                    removeAmountFrom(source, item, toAdd);
+                    main.dsuupdatemanager.updateItemsExact(dest);
+                    return;
+                }
             }
         }
-    }
-
-    private void removeOneFrom(Inventory inv, ItemStack template) {
-        removeAmountFrom(inv, template, 1);
+        // OUTPUT (dsuIsSource): vanilla handles it — no cancel, item already checked for no meta above
     }
 
     private void removeAmountFrom(Inventory inv, ItemStack template, int amount) {
