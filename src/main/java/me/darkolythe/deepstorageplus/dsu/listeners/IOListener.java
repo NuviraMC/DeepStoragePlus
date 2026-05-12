@@ -20,8 +20,10 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -99,16 +101,10 @@ public class IOListener implements Listener {
     }
 
     private void handleInput(InventoryMoveItemEvent event, Inventory dsu) {
-        // Do NOT cancel the event - cancelling stops the hopper cooldown reset
-        // and the hopper never fires again, losing all remaining items.
-        // Instead: let Vanilla put the item into the chest, then absorb it immediately.
-
         Location dsuLoc = dsu.getLocation();
         if (dsuLoc == null) return;
         String key = dsuLoc.getWorld().getName() + "|" + dsuLoc.getBlockX() + "|" + dsuLoc.getBlockY() + "|" + dsuLoc.getBlockZ();
 
-        // Schedule absorb for next tick (after Vanilla wrote item into chest)
-        // De-duplicate: only one absorb task per DSU per tick
         if (pendingAbsorb.contains(key)) return;
         pendingAbsorb.add(key);
 
@@ -125,17 +121,21 @@ public class IOListener implements Listener {
     }
 
     /**
-     * Absorbs all items from non-persistent DSU slots into DSU storage.
-     * Items are first merged by type so that multiple stacks of the same
-     * material (placed into different slots by Vanilla) are stored as a
-     * single DSU entry rather than creating duplicate template entries.
+     * Absorbs all stray items (placed by Vanilla hopper) from non-persistent
+     * DSU slots into the DSU container storage.
+     *
+     * Strategy:
+     *  1. Collect all stray slots and their items.
+     *  2. Clear those slots immediately so the inventory is clean.
+     *  3. Merge identical materials into one stack and call addToDSUSilent
+     *     once per material — prevents duplicate template entries.
+     *  4. Any remainder that didn't fit goes back into the cleared slots.
+     *  5. updateItemsExact runs once at the end so the display is always fresh.
      */
     private void absorb(Inventory dsu) {
-        // Pass 1: collect all stray items by slot, merge identical types
-        // into one representative ItemStack per type so addToDSUSilent only
-        // sees each type once and cannot create split template entries.
-        Map<Integer, ItemStack> slotMap = new HashMap<>();   // slot -> original slot ref for cleanup
-        Map<String, ItemStack>  merged  = new HashMap<>();   // typeKey -> merged stack to store
+        // Step 1: collect stray slots
+        List<Integer> straySlots = new ArrayList<>();
+        Map<String, ItemStack> merged = new HashMap<>(); // materialName -> merged stack
 
         for (int i = 0; i < dsu.getSize(); i++) {
             if (PERSISTENT_DSU_SLOTS.contains(i)) continue;
@@ -143,7 +143,7 @@ public class IOListener implements Listener {
             if (slot == null || slot.getType() == Material.AIR) continue;
             if (!hasNoMeta(slot)) continue;
 
-            slotMap.put(i, slot);
+            straySlots.add(i);
             String key = slot.getType().name();
             if (merged.containsKey(key)) {
                 merged.get(key).setAmount(merged.get(key).getAmount() + slot.getAmount());
@@ -152,9 +152,15 @@ public class IOListener implements Listener {
             }
         }
 
-        if (merged.isEmpty()) return;
+        if (straySlots.isEmpty()) return;
 
-        // Pass 2: store merged stacks into DSU containers
+        // Step 2: clear the stray slots before storing so addToDSUSilent
+        // cannot accidentally write into them (they are non-persistent slots).
+        for (int i : straySlots) {
+            dsu.setItem(i, null);
+        }
+
+        // Step 3: store merged stacks — one addToDSUSilent call per material
         boolean anyStored = false;
         for (ItemStack toStore : merged.values()) {
             int before = toStore.getAmount();
@@ -164,31 +170,21 @@ public class IOListener implements Listener {
             if (stored > 0) anyStored = true;
         }
 
-        // Pass 3: remove exactly what was stored from the physical slots
-        for (Map.Entry<Integer, ItemStack> entry : slotMap.entrySet()) {
-            int slot = entry.getKey();
-            ItemStack original = entry.getValue();
-            String key = original.getType().name();
-            ItemStack mergedStack = merged.get(key);
-            if (mergedStack == null) continue;
-
-            // mergedStack.getAmount() is whatever was NOT stored (remainder).
-            // Distribute remainder back proportionally: clear all slots first,
-            // then put the leftover into the first slot of that type.
-            dsu.setItem(slot, null);
-        }
-
-        // Put any unstored remainder back into the first available free slot
-        for (ItemStack mergedStack : merged.values()) {
-            if (mergedStack.getAmount() <= 0) continue;
-            // DSU is full for this type — put remainder back
-            HashMap<Integer, ItemStack> leftover = dsu.addItem(mergedStack);
-            if (!leftover.isEmpty()) {
-                // Chest is completely full — drop or leave (should be extremely rare)
-                log.warning("[DSU-ABSORB] Could not return remainder for " + mergedStack.getType() + " x" + mergedStack.getAmount());
+        // Step 4: put remainders (DSU full) back into the slots we cleared
+        int remainderSlot = 0;
+        for (ItemStack remainder : merged.values()) {
+            if (remainder.getAmount() <= 0) continue;
+            // Find a free slot from the ones we cleared
+            while (remainderSlot < straySlots.size()) {
+                int physSlot = straySlots.get(remainderSlot++);
+                if (dsu.getItem(physSlot) == null) {
+                    dsu.setItem(physSlot, remainder);
+                    break;
+                }
             }
         }
 
+        // Step 5: refresh display
         if (anyStored) {
             main.dsuupdatemanager.updateItemsExact(dsu);
         }
