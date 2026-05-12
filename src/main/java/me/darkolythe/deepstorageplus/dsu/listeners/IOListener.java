@@ -100,7 +100,7 @@ public class IOListener implements Listener {
         long currentTick = main.getServer().getCurrentTick();
 
         Long last = lastInputTick.get(key);
-        log.info("[HOPPER-IN DEBUG] tick=" + currentTick + " key=" + key
+        log.info("[HOPPER-IN DEBUG] tick=" + currentTick
                 + " lastTick=" + last
                 + " eventItem=" + event.getItem().getType()
                 + " eventItemAmt=" + event.getItem().getAmount());
@@ -115,12 +115,16 @@ public class IOListener implements Listener {
         }
 
         // Log all hopper slots
+        int hopperTotal = 0;
         for (int i = 0; i < hopper.getSize(); i++) {
             ItemStack s = hopper.getItem(i);
+            int amt = (s != null && s.getType() != Material.AIR) ? s.getAmount() : 0;
+            hopperTotal += amt;
             log.info("[HOPPER-IN DEBUG] hopperSlot[" + i + "] = "
                     + (s == null ? "null" : s.getType() + "x" + s.getAmount())
                     + " hasNoMeta=" + (s != null && hasNoMeta(s)));
         }
+        log.info("[HOPPER-IN DEBUG] hopperTotal=" + hopperTotal);
 
         for (int i = 0; i < hopper.getSize(); i++) {
             ItemStack slot = hopper.getItem(i);
@@ -132,10 +136,14 @@ public class IOListener implements Listener {
             DSUManager.addToDSUSilent(toStore, dsu);
             int stored = before - toStore.getAmount();
 
-            log.info("[HOPPER-IN DEBUG] -> trying slot " + i + " type=" + slot.getType()
-                    + " hopperAmt=" + slot.getAmount()
+            // Count total in DSU after store
+            int dsuTotal = DSUManager.getTotalItemAmount(dsu, new ItemStack(slot.getType(), 1));
+
+            log.info("[HOPPER-IN DEBUG] -> slot=" + i
+                    + " type=" + slot.getType()
+                    + " hopperSlotAmt=" + slot.getAmount()
                     + " stored=" + stored
-                    + " toStoreAmtAfter=" + toStore.getAmount());
+                    + " DSU_total_now=" + dsuTotal);
 
             if (stored <= 0) {
                 log.info("[HOPPER-IN DEBUG] -> DSU full/no container, aborting");
@@ -149,14 +157,14 @@ public class IOListener implements Listener {
                 slot.setAmount(slot.getAmount() - 1);
                 hopper.setItem(i, slot);
             }
-            log.info("[HOPPER-IN DEBUG] -> removed 1 from slot " + i
-                    + " was=" + amtBefore + " now=" + (hopper.getItem(i) == null ? 0 : hopper.getItem(i).getAmount()));
+            log.info("[HOPPER-IN DEBUG] -> removed from hopperSlot[" + i + "] was=" + amtBefore
+                    + " now=" + (hopper.getItem(i) == null ? 0 : hopper.getItem(i).getAmount()));
 
             main.dsuupdatemanager.updateItemsExact(dsu);
             return;
         }
 
-        log.info("[HOPPER-IN DEBUG] -> no valid slot found in hopper");
+        log.info("[HOPPER-IN DEBUG] -> no valid slot found");
     }
 
     private void handleOutput(InventoryMoveItemEvent event, Inventory dsu, Inventory hopper) {
