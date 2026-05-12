@@ -20,9 +20,6 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -31,12 +28,12 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpee
 
 public class IOListener implements Listener {
 
-    private static final Set<Integer> PLUGIN_SLOTS = Set.of(7, 8, 16, 17, 25, 26, 34, 35, 43, 44, 52, 53);
+    // Slots that hold persistent DSU data (containers + IO item).
+    // Wall items (7,16,25,34,43,52) are GUI-only and NOT stored in the physical chest.
+    private static final Set<Integer> PERSISTENT_DSU_SLOTS = Set.of(8, 17, 26, 35, 44, 53);
 
     private final DeepStoragePlus main;
     private final Logger log;
-    private final Map<String, Long> lastInputTick = new HashMap<>();
-    private final Set<String> scheduledRescues = new HashSet<>();
 
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin;
@@ -98,106 +95,66 @@ public class IOListener implements Listener {
     }
 
     private void handleInput(InventoryMoveItemEvent event, Inventory hopper, Inventory dsu) {
+        // Cancel vanilla transfer — we handle it ourselves
         event.setCancelled(true);
 
-        Location hopperLoc = hopper.getLocation();
-        String hopperKey = hopperLoc != null ? locKey(hopperLoc) : "unknown";
-        long currentTick = main.getServer().getCurrentTick();
+        // The event item is the 1 item Vanilla *would* transfer.
+        // Store it directly into the DSU.
+        ItemStack toStore = event.getItem().clone();
+        DSUManager.addToDSUSilent(toStore, dsu);
+        int stored = event.getItem().getAmount() - toStore.getAmount();
 
-        Long last = lastInputTick.get(hopperKey);
-        log.info("[HOPPER-IN] tick=" + currentTick + " lastTick=" + last
-                + " item=" + event.getItem().getType() + "x" + event.getItem().getAmount());
+        log.info("[HOPPER-IN] item=" + event.getItem().getType()
+                + " amt=" + event.getItem().getAmount()
+                + " stored=" + stored);
 
-        if (last != null && last == currentTick) {
-            log.info("[HOPPER-IN] -> SKIPPED (duplicate tick)");
+        if (stored <= 0) {
+            // DSU full / no container for this item type
             return;
         }
-        lastInputTick.put(hopperKey, currentTick);
-        if (lastInputTick.size() > 512) {
-            lastInputTick.entrySet().removeIf(e -> e.getValue() < currentTick - 40);
+
+        // Remove the transferred item from the source hopper
+        ItemStack[] hopperContents = hopper.getContents();
+        int remaining = stored;
+        for (int i = 0; i < hopperContents.length && remaining > 0; i++) {
+            ItemStack slot = hopperContents[i];
+            if (slot == null || slot.getType() == Material.AIR) continue;
+            if (!slot.isSimilar(event.getItem()) && slot.getType() != event.getItem().getType()) continue;
+
+            int take = Math.min(slot.getAmount(), remaining);
+            remaining -= take;
+            slot.setAmount(slot.getAmount() - take);
+            hopper.setItem(i, slot.getAmount() <= 0 ? null : slot);
         }
 
-        // Drain entire hopper into DSU right now
-        for (int i = 0; i < hopper.getSize(); i++) {
-            ItemStack slot = hopper.getItem(i);
+        // Synchronously clean up any stray items in non-DSU slots
+        // (Vanilla may have already written to the chest before we could cancel)
+        cleanStraySlots(dsu);
+
+        main.dsuupdatemanager.updateItemsExact(dsu);
+    }
+
+    /**
+     * Scans every chest slot that is NOT a persistent DSU slot and rescues
+     * any items Vanilla may have written there before our cancel took effect.
+     */
+    private void cleanStraySlots(Inventory dsu) {
+        for (int i = 0; i < dsu.getSize(); i++) {
+            if (PERSISTENT_DSU_SLOTS.contains(i)) continue;
+            ItemStack slot = dsu.getItem(i);
             if (slot == null || slot.getType() == Material.AIR) continue;
             if (!hasNoMeta(slot)) continue;
 
-            ItemStack toStore = new ItemStack(slot.getType(), slot.getAmount());
+            ItemStack toStore = slot.clone();
             DSUManager.addToDSUSilent(toStore, dsu);
             int stored = slot.getAmount() - toStore.getAmount();
-            log.info("[HOPPER-IN] slot=" + i + " type=" + slot.getType()
-                    + " amt=" + slot.getAmount() + " stored=" + stored);
-
             if (stored <= 0) continue;
 
-            if (toStore.getAmount() <= 0) {
-                hopper.setItem(i, null);
-            } else {
-                hopper.setItem(i, toStore);
-            }
+            log.info("[STRAY-CLEAN] slot=" + i + " type=" + slot.getType()
+                    + " amt=" + slot.getAmount() + " stored=" + stored);
+
+            dsu.setItem(i, toStore.getAmount() <= 0 ? null : toStore);
         }
-        main.dsuupdatemanager.updateItemsExact(dsu);
-
-        // Schedule rescue task: catch items Vanilla may write directly into chest slots
-        Location dsuLoc = dsu.getLocation();
-        if (dsuLoc == null) return;
-        String rescueKey = locKey(dsuLoc);
-        if (scheduledRescues.contains(rescueKey)) return;
-        scheduledRescues.add(rescueKey);
-
-        main.getServer().getScheduler().runTaskLater(main, () -> {
-            scheduledRescues.remove(rescueKey);
-            if (dsuLoc.getWorld() == null) return;
-            Block block = dsuLoc.getBlock();
-            if (!(block.getState() instanceof Chest chest)) return;
-            Inventory freshDsu = chest.getInventory();
-
-            // ---- DEBUG: dump every non-empty slot ----
-            log.info("[RESCUE] scanning DSU @ " + rescueKey);
-            for (int i = 0; i < freshDsu.getSize(); i++) {
-                ItemStack s = freshDsu.getItem(i);
-                if (s != null && s.getType() != Material.AIR) {
-                    log.info("  slot[" + i + "]=" + s.getType() + "x" + s.getAmount()
-                            + " isPlugin=" + ItemList.isPluginItem(s)
-                            + " inPluginSlotSet=" + PLUGIN_SLOTS.contains(i));
-                }
-            }
-            // ------------------------------------------
-
-            if (!StorageUtils.isDSU(freshDsu)) {
-                log.info("[RESCUE] -> not a DSU anymore, skipping");
-                return;
-            }
-
-            boolean anyRescued = false;
-            for (int i = 0; i < freshDsu.getSize(); i++) {
-                if (PLUGIN_SLOTS.contains(i)) continue;
-                ItemStack slot = freshDsu.getItem(i);
-                if (slot == null || slot.getType() == Material.AIR) continue;
-                if (!hasNoMeta(slot)) continue;
-
-                ItemStack toStore = slot.clone();
-                DSUManager.addToDSUSilent(toStore, freshDsu);
-                int stored = slot.getAmount() - toStore.getAmount();
-                log.info("[RESCUE] rescued slot[" + i + "] type=" + slot.getType()
-                        + " amt=" + slot.getAmount() + " stored=" + stored);
-
-                if (stored <= 0) continue;
-                anyRescued = true;
-                if (toStore.getAmount() <= 0) {
-                    freshDsu.setItem(i, null);
-                } else {
-                    freshDsu.setItem(i, toStore);
-                }
-            }
-
-            if (anyRescued) {
-                main.dsuupdatemanager.updateItemsExact(freshDsu);
-            } else {
-                log.info("[RESCUE] nothing to rescue");
-            }
-        }, 1L);
     }
 
     private void handleOutput(InventoryMoveItemEvent event, Inventory dsu, Inventory hopper) {
