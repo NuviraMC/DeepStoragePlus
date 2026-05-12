@@ -8,7 +8,6 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
 import org.bukkit.block.DoubleChest;
-import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -60,24 +59,25 @@ public class StorageUtils {
     }
 
     /**
-     * Erkennt ein DSU-Inventory zuverlässig — auch wenn die Kiste geschlossen ist.
+     * Erkennt ein DSU-Inventory zuverlässig — auch wenn die Kiste geschlossen ist
+     * oder Paper intern einen anderen InventoryType zurückgibt (z.B. bei Hopper-Events).
+     *
+     * Der InventoryType-Check wurde entfernt, da Paper bei InventoryMoveItemEvent
+     * für Block-Inventories nicht immer CHEST zurückgibt, was dazu führte dass
+     * isDSU() false zurückgab und Vanilla Items direkt in die Truhe schrieb.
      *
      * Strategie (in Reihenfolge):
      *  1. Slot 53 enthält ein IO-Settings-Item (immer persistent in der Kiste)
      *  2. Mindestens ein Storage-Container in den Slots 8,17,26,35,44
-     *
-     * Die früher verwendeten Wall-Items in Slots 7,16,25,34,43,52 sind GUI-only
-     * und werden bei einer geschlossenen Kiste nicht gespeichert.
      */
     public static boolean isDSU(Inventory inv) {
         if (inv == null || inv.getSize() != 54) return false;
-        if (inv.getType() != InventoryType.CHEST) return false;
 
         // Primary check: IO-Settings item in slot 53 (always persisted)
         ItemStack slot53 = inv.getItem(53);
         if (ItemList.isItem(slot53, ItemList.KEY_IO_SETTINGS)) return true;
 
-        // Fallback: at least one storage container present (open-inventory case)
+        // Fallback: at least one storage container present
         int[] containerSlots = {8, 17, 26, 35, 44};
         for (int s : containerSlots) {
             if (ItemList.isGroup(inv.getItem(s), ItemList.GROUP_STORAGE_CONTAINER)) return true;
@@ -88,7 +88,6 @@ public class StorageUtils {
 
     public static boolean isSorter(Inventory inv) {
         if (inv == null || inv.getSize() != 54) return false;
-        if (inv.getType() != InventoryType.CHEST) return false;
         int[] slots = {18, 19, 20, 21, 22, 23, 24, 25, 26};
         for (int i : slots) {
             if (java.util.Objects.equals(inv.getItem(i), SorterManager.getSorterWall())) return true;
