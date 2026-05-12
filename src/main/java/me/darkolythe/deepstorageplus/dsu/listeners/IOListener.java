@@ -5,6 +5,7 @@ import me.darkolythe.deepstorageplus.dsu.StorageUtils;
 import me.darkolythe.deepstorageplus.dsu.managers.DSUManager;
 import me.darkolythe.deepstorageplus.utils.ItemList;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -66,6 +67,12 @@ public class IOListener implements Listener {
     private void onHopperMove(InventoryMoveItemEvent event) {
         Inventory source = event.getSource();
         Inventory dest   = event.getDestination();
+
+        if (dest.getSize() == 54) {
+            Bukkit.getLogger().info("[HOPPER RAW] dest.getType()=" + dest.getType()
+                    + " slot53=" + (dest.getItem(53) != null ? dest.getItem(53).getType() : "null")
+                    + " isDSU=" + StorageUtils.isDSU(dest));
+        }
 
         boolean dsuIsSource = source.getSize() == 54 && StorageUtils.isDSU(source);
         boolean dsuIsDest   = dest.getSize()   == 54 && StorageUtils.isDSU(dest);
