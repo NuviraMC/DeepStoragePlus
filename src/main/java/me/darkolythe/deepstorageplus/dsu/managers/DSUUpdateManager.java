@@ -4,6 +4,7 @@ import me.darkolythe.deepstorageplus.DeepStoragePlus;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -20,38 +21,56 @@ public class DSUUpdateManager {
 
     /*
     Update the items in the dsu. This is done when items are added, taken, Storage Containers are added, taken, and when opening the dsu.
-     */
+    */
     public void updateItemsExact(Inventory inv) {
-        if (inv.getLocation() == null) {
-            return;
-        }
-        if (!DeepStoragePlus.recentDSUCalls.containsKey(inv.getLocation())) {
-            DeepStoragePlus.recentDSUCalls.put(inv.getLocation(), 0L);
-        }
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
-            // if over a second has passed since the last bulk item was placed in the dsu, update it
-            if (!DeepStoragePlus.recentDSUCalls.containsKey(inv.getLocation())) {
+        Location loc = inv.getLocation();
+
+        // Virtual inventories have no location — use a stable identity key instead.
+        Object cacheKey = (loc != null) ? loc : System.identityHashCode(inv);
+
+        if (!DeepStoragePlus.recentDSUCalls.containsKey(cacheKey instanceof Location ? (Location) cacheKey : loc)) {
+            // For virtual inventories we skip the rate-limit cache entirely and just run immediately.
+            if (loc == null) {
+                Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
+                    refreshDisplayItems(inv);
+                    sortInventoryIfOpen(inv);
+                }, 5L);
                 return;
             }
-            if (System.currentTimeMillis() - DeepStoragePlus.recentDSUCalls.get(inv.getLocation()) < 200) {
+            DeepStoragePlus.recentDSUCalls.put(loc, 0L);
+        }
+
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
+            if (loc == null) {
+                refreshDisplayItems(inv);
+                sortInventoryIfOpen(inv);
+                return;
+            }
+            if (!DeepStoragePlus.recentDSUCalls.containsKey(loc)) {
+                return;
+            }
+            if (System.currentTimeMillis() - DeepStoragePlus.recentDSUCalls.get(loc) < 200) {
                 return;
             }
 
-            DeepStoragePlus.recentDSUCalls.put(inv.getLocation(), System.currentTimeMillis());
+            DeepStoragePlus.recentDSUCalls.put(loc, System.currentTimeMillis());
 
             refreshDisplayItems(inv);
-
-            for (UUID key : DeepStoragePlus.stashedDSU.keySet()) {
-                if (!DeepStoragePlus.openDSU.containsKey(key) || DeepStoragePlus.openDSU.get(key) == null) {
-                    continue;
-                }
-                Inventory openInv = DeepStoragePlus.openDSU.get(key).getInventory();
-                if (Objects.equals(inv.getItem(8), openInv.getItem(8))) {
-                    sortInventory(inv);
-                    return;
-                }
-            }
+            sortInventoryIfOpen(inv);
         }, 5L);
+    }
+
+    private void sortInventoryIfOpen(Inventory inv) {
+        for (UUID key : DeepStoragePlus.stashedDSU.keySet()) {
+            if (!DeepStoragePlus.openDSU.containsKey(key) || DeepStoragePlus.openDSU.get(key) == null) {
+                continue;
+            }
+            Inventory openInv = DeepStoragePlus.openDSU.get(key).getInventory();
+            if (Objects.equals(inv.getItem(8), openInv.getItem(8))) {
+                sortInventory(inv);
+                return;
+            }
+        }
     }
 
     private void sortInventory(Inventory inv) {
