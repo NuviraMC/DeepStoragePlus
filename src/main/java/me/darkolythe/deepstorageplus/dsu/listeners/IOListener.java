@@ -22,19 +22,18 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.hasNoMeta;
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.stringToMat;
-import static me.darkolythe.deepstorageplus.dsu.managers.DSUManager.addDataToContainer;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpeedUpgrade;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.getSpeedUpgrade;
 
 public class IOListener implements Listener {
 
     private final DeepStoragePlus main;
+
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin;
     }
@@ -47,10 +46,10 @@ public class IOListener implements Listener {
             if (block != null && block.getType() == Material.CHEST) {
                 if (!event.isCancelled()) {
                     Chest chest = (Chest) block.getState();
-                    Inventory inv = chest.getInventory();
                     if (chest.getInventory().contains(DSUManager.getDSUWall())) {
                         ItemStack item = player.getInventory().getItemInMainHand();
                         if (ItemList.isItem(item, ItemList.KEY_SPEED_UPGRADE)) {
+                            var inv = chest.getInventory();
                             ItemStack IOItem = inv.getItem(53);
                             ItemStack newIOItem = addSpeedUpgrade(IOItem);
                             if (newIOItem != null) {
@@ -76,225 +75,190 @@ public class IOListener implements Listener {
         Inventory initial = event.getSource();
         Inventory dest = event.getDestination();
 
-        if (initial.getSize() == 54 || dest.getSize() == 54) {
+        if (initial.getSize() != 54 && dest.getSize() != 54) return;
 
-            ItemStack moveItem = event.getItem();
+        ItemStack moveItem = event.getItem();
 
-            ItemStack IOSettings;
-            Inventory IOInv;
-            String IOStatus = "input";
+        // Determine direction: DSU is source (output) or destination (input)
+        boolean dsuIsSource = initial.getSize() == 54 && StorageUtils.isDSU(initial);
+        boolean dsuIsDest   = dest.getSize()    == 54 && StorageUtils.isDSU(dest);
 
-            if (initial.getSize() == 54) {
-                IOSettings = initial.getItem(53);
-                IOInv = initial;
-                IOStatus = "output";
-            } else {
-                IOSettings = dest.getItem(53);
-                IOInv = dest;
-            }
-
-            if (StorageUtils.isDSU(IOInv)) {
-                if (IOSettings == null || !ItemList.isItem(IOSettings, ItemList.KEY_IO_SETTINGS)) {
-                    return;
-                }
-                if (!hasNoMeta(moveItem)) {
-                    return;
-                }
-
-                ItemStack input = getInput(IOSettings);
-                ItemStack output = getOutput(IOSettings);
-
-                int amt = getSpeedUpgrade(IOSettings);
-
-                event.setCancelled(true);
-
-                if (IOStatus.equals("input")) {
-                    lookForItemInHopper(initial, dest, input, amt + 1);
-                } else {
-                    // Only attempt output if an output type is actually configured
-                    if (output != null && output.getType() != Material.AIR) {
-                        lookForItemInChest(output, initial, dest, amt + 1);
-                    }
-                }
-            } else if (StorageUtils.isSorter(IOInv)) {
-                if (IOStatus.equals("input")) {
-                    main.sorterUpdateManager.sortItems(IOInv, DeepStoragePlus.minTimeSinceLastSortHopper);
+        if (!dsuIsSource && !dsuIsDest) {
+            // Check sorter
+            Inventory sorterInv = dsuIsSource ? initial : dest;
+            if (StorageUtils.isSorter(dest.getSize() == 54 ? dest : initial)) {
+                if (!dsuIsSource) {
+                    main.sorterUpdateManager.sortItems(dest, DeepStoragePlus.minTimeSinceLastSortHopper);
                 } else {
                     event.setCancelled(true);
                 }
             }
+            return;
+        }
+
+        Inventory dsuInv = dsuIsSource ? initial : dest;
+        ItemStack IOSettings = dsuInv.getItem(53);
+
+        if (IOSettings == null || !ItemList.isItem(IOSettings, ItemList.KEY_IO_SETTINGS)) {
+            return; // no IO setup → allow vanilla hopper behaviour
+        }
+        if (!hasNoMeta(moveItem)) {
+            return; // never move plugin items via hopper
+        }
+
+        // Always cancel the vanilla move — we handle it ourselves
+        event.setCancelled(true);
+
+        int amt = getSpeedUpgrade(IOSettings) + 1;
+
+        if (dsuIsDest) {
+            // Hopper → DSU (input)
+            ItemStack input = getInput(IOSettings);
+            scheduleHopperToDSU(initial, dest, input, amt);
+        } else {
+            // DSU → Hopper (output)
+            ItemStack output = getOutput(IOSettings);
+            if (output != null && output.getType() != Material.AIR) {
+                scheduleDSUToHopper(initial, dest, output, amt);
+            }
         }
     }
 
-    private static ItemStack getInput(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) {
-            return null;
-        }
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-        ItemStack exact = DSUManager.getIoTemplate(item, DSUManager.IO_INPUT_TEMPLATE_TAG);
-        if (exact != null) {
-            return exact;
-        }
-        List<String> lore = meta.getLore();
-        if (lore == null || lore.isEmpty()) {
-            return null;
-        }
+    // -----------------------------------------------------------------------
+    // Hopper → DSU
+    // Moves exactly `amt` items from the first matching hopper slot into DSU.
+    // Writes the reduced amount back to the slot so nothing is lost.
+    // -----------------------------------------------------------------------
+    private void scheduleHopperToDSU(Inventory hopper, Inventory dsu, ItemStack filter, int amt) {
+        Bukkit.getScheduler().scheduleSyncDelayedTask(main, () -> {
+            for (int i = 0; i < hopper.getSize(); i++) {
+                ItemStack slot = hopper.getItem(i);
+                if (slot == null || slot.getType() == Material.AIR) continue;
+                if (filter != null && !filter.isSimilar(slot)) continue;
+                if (!hasNoMeta(slot)) continue;
 
-        String line = findIOLine(lore, LanguageManager.getValue("input"), "input", "eingang");
-        if (line == null) {
-            return null;
-        }
+                int toMove = Math.min(amt, slot.getAmount());
 
-        String value = extractIOValue(line);
-        if (isAllValue(value)) {
-            return null;
-        }
+                // Clone exactly the amount we want to move
+                ItemStack moving = slot.clone();
+                moving.setAmount(toMove);
 
-        Material parsed = stringToMat(line, "");
-        return parsed == Material.AIR ? null : new ItemStack(parsed);
-    }
+                // addToDSUSilent drains moving.getAmount() down to what couldn't be stored
+                DSUManager.addToDSUSilent(moving, dsu);
+                int actuallyStored = toMove - moving.getAmount();
 
-    private static ItemStack getOutput(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) {
-            return null;
-        }
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-        ItemStack exact = DSUManager.getIoTemplate(item, DSUManager.IO_OUTPUT_TEMPLATE_TAG);
-        if (exact != null) {
-            return exact;
-        }
-        List<String> lore = meta.getLore();
-        if (lore == null || lore.size() < 2) {
-            return null;
-        }
+                if (actuallyStored <= 0) return; // DSU full / no matching container
 
-        String line = findIOLine(lore, LanguageManager.getValue("output"), "output", "ausgang");
-        if (line == null) {
-            return null;
-        }
-
-        String value = extractIOValue(line);
-        if (isNoneValue(value)) {
-            return null;
-        }
-
-        Material parsed = stringToMat(line, "");
-        return parsed == Material.AIR ? null : new ItemStack(parsed);
-    }
-
-    /**
-     * Hopper -> DSU: pulls items from hopper slots into the DSU containers.
-     * Overflow (items that don't fit) stays in the hopper slot.
-     */
-    private void lookForItemInHopper(Inventory initial, Inventory dest, ItemStack input, int amt) {
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
-            for (int i = 0; i < 5; i++) {
-                ItemStack toMove = initial.getItem(i);
-                if (toMove == null || toMove.getType() == Material.AIR) continue;
-                if (input != null && !input.isSimilar(toMove)) continue;
-                if (!hasNoMeta(toMove)) continue;
-
-                // How many we want to move this tick
-                int wantToMove = Math.min(amt, toMove.getAmount());
-
-                // Try to push into DSU containers
-                ItemStack moving = toMove.clone();
-                moving.setAmount(wantToMove);
-
-                // addToDSUSilent reduces moving.getAmount() by what was actually stored
-                boolean allStored = DSUManager.addToDSUSilent(moving, dest);
-                int actuallyStored = wantToMove - moving.getAmount();
-
-                if (actuallyStored > 0) {
-                    // Reduce the hopper slot by exactly how much was stored
-                    int remaining = toMove.getAmount() - actuallyStored;
-                    if (remaining <= 0) {
-                        initial.setItem(i, null);
-                    } else {
-                        toMove.setAmount(remaining);
-                    }
-                    main.dsuupdatemanager.updateItemsExact(dest);
-                    return; // one stack per hopper tick
+                // Write the corrected remainder back to the hopper slot
+                int newAmt = slot.getAmount() - actuallyStored;
+                if (newAmt <= 0) {
+                    hopper.setItem(i, null);
+                } else {
+                    ItemStack remainder = slot.clone();
+                    remainder.setAmount(newAmt);
+                    hopper.setItem(i, remainder);
                 }
-                return; // no space in DSU
+
+                main.dsuupdatemanager.updateItemsExact(dsu);
+                return; // one slot per hopper tick — match vanilla behaviour
             }
-        }, 1);
+        }, 1L);
     }
 
-    /**
-     * DSU -> Hopper: pulls items from DSU containers into the hopper.
-     * Only pulls what actually fits into the hopper (overflow stays in DSU).
-     */
-    private void lookForItemInChest(ItemStack output, Inventory initial, Inventory dest, int amt) {
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
-            int totalAmount = DSUManager.getTotalItemAmount(initial, output);
-            int wantToMove = Math.min(amt, totalAmount);
-            if (wantToMove <= 0) {
-                return;
-            }
+    // -----------------------------------------------------------------------
+    // DSU → Hopper
+    // Pulls exactly `amt` items of type `output` from DSU into the hopper.
+    // Only removes from DSU what actually fit into the hopper.
+    // -----------------------------------------------------------------------
+    private void scheduleDSUToHopper(Inventory dsu, Inventory hopper, ItemStack output, int amt) {
+        Bukkit.getScheduler().scheduleSyncDelayedTask(main, () -> {
+            int available = DSUManager.getTotalItemAmount(dsu, output);
+            if (available <= 0) return;
+
+            int wantToMove = Math.min(amt, available);
 
             ItemStack toGive = output.clone();
             toGive.setAmount(wantToMove);
 
-            // addItem returns overflow that didn't fit
-            HashMap<Integer, ItemStack> overflow = dest.addItem(toGive);
-            int overflowAmt = 0;
-            for (ItemStack leftover : overflow.values()) {
-                overflowAmt += leftover.getAmount();
-            }
-
+            // addItem returns items that didn't fit
+            HashMap<Integer, ItemStack> overflow = hopper.addItem(toGive);
+            int overflowAmt = overflow.values().stream().mapToInt(ItemStack::getAmount).sum();
             int actuallyMoved = wantToMove - overflowAmt;
-            if (actuallyMoved <= 0) {
-                return;
-            }
 
-            DSUManager.takeItems(output, initial, actuallyMoved);
-            main.dsuupdatemanager.updateItemsExact(initial);
-        }, 1);
+            if (actuallyMoved <= 0) return; // hopper full
+
+            DSUManager.takeItems(output, dsu, actuallyMoved);
+            main.dsuupdatemanager.updateItemsExact(dsu);
+        }, 1L);
+    }
+
+    // -----------------------------------------------------------------------
+    // IO Settings helpers
+    // -----------------------------------------------------------------------
+
+    private static ItemStack getInput(ItemStack ioItem) {
+        if (ioItem == null || !ioItem.hasItemMeta()) return null;
+        // Check PDC template first (set via in-game IO config GUI)
+        ItemStack exact = DSUManager.getIoTemplate(ioItem, DSUManager.IO_INPUT_TEMPLATE_TAG);
+        if (exact != null) return exact;
+        // Fall back to lore text
+        List<String> lore = ioItem.getItemMeta().getLore();
+        if (lore == null) return null;
+        String line = findIOLine(lore, LanguageManager.getValue("input"), "input", "eingang");
+        if (line == null) return null;
+        String value = extractIOValue(line);
+        if (isAllValue(value)) return null; // "all" → accept everything (null filter)
+        Material mat = stringToMat(line, "");
+        return mat == Material.AIR ? null : new ItemStack(mat);
+    }
+
+    private static ItemStack getOutput(ItemStack ioItem) {
+        if (ioItem == null || !ioItem.hasItemMeta()) return null;
+        // Check PDC template first
+        ItemStack exact = DSUManager.getIoTemplate(ioItem, DSUManager.IO_OUTPUT_TEMPLATE_TAG);
+        if (exact != null) return exact;
+        // Fall back to lore text
+        List<String> lore = ioItem.getItemMeta().getLore();
+        if (lore == null || lore.size() < 2) return null;
+        String line = findIOLine(lore, LanguageManager.getValue("output"), "output", "ausgang");
+        if (line == null) return null;
+        String value = extractIOValue(line);
+        if (isNoneValue(value)) return null; // "none" → output disabled
+        Material mat = stringToMat(line, "");
+        return mat == Material.AIR ? null : new ItemStack(mat);
     }
 
     private static String findIOLine(List<String> lore, String configuredKey, String... aliases) {
-        String normalizedConfigured = normalizeToken(configuredKey);
+        String normKey = normalizeToken(configuredKey);
         for (String line : lore) {
-            String normalizedLine = normalizeToken(ChatColor.stripColor(line));
-            if (normalizedLine.isEmpty()) continue;
-            if (!normalizedConfigured.isEmpty() && normalizedLine.startsWith(normalizedConfigured + ":")) {
-                return line;
-            }
+            String normLine = normalizeToken(ChatColor.stripColor(line));
+            if (normLine.isEmpty()) continue;
+            if (!normKey.isEmpty() && normLine.startsWith(normKey + ":")) return line;
             for (String alias : aliases) {
-                String normalizedAlias = normalizeToken(alias);
-                if (!normalizedAlias.isEmpty() && normalizedLine.startsWith(normalizedAlias + ":")) {
-                    return line;
-                }
+                String normAlias = normalizeToken(alias);
+                if (!normAlias.isEmpty() && normLine.startsWith(normAlias + ":")) return line;
             }
         }
         return null;
     }
 
     private static String extractIOValue(String line) {
-        String stripped = ChatColor.stripColor(line);
-        if (stripped == null || stripped.isEmpty()) return "";
-        int idx = stripped.indexOf(':');
-        if (idx < 0 || idx + 1 >= stripped.length()) return stripped.trim();
-        return stripped.substring(idx + 1).trim();
+        String s = ChatColor.stripColor(line);
+        if (s == null || s.isEmpty()) return "";
+        int idx = s.indexOf(':');
+        return (idx < 0 || idx + 1 >= s.length()) ? s.trim() : s.substring(idx + 1).trim();
     }
 
-    private static boolean isAllValue(String value) {
-        String normalized = normalizeToken(value);
-        String config = normalizeToken(LanguageManager.getValue("all"));
-        return normalized.equals("all") || normalized.equals("alle") || (!config.isEmpty() && normalized.equals(config));
+    private static boolean isAllValue(String v) {
+        String n = normalizeToken(v);
+        String c = normalizeToken(LanguageManager.getValue("all"));
+        return n.equals("all") || n.equals("alle") || (!c.isEmpty() && n.equals(c));
     }
 
-    private static boolean isNoneValue(String value) {
-        String normalized = normalizeToken(value);
-        String config = normalizeToken(LanguageManager.getValue("none"));
-        return normalized.equals("none") || normalized.equals("keine") || (!config.isEmpty() && normalized.equals(config));
+    private static boolean isNoneValue(String v) {
+        String n = normalizeToken(v);
+        String c = normalizeToken(LanguageManager.getValue("none"));
+        return n.equals("none") || n.equals("keine") || (!c.isEmpty() && n.equals(c));
     }
 
     private static String normalizeToken(String value) {
