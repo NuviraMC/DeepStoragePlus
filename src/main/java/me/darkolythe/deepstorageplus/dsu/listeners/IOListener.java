@@ -20,7 +20,9 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -124,27 +126,69 @@ public class IOListener implements Listener {
 
     /**
      * Absorbs all items from non-persistent DSU slots into DSU storage.
-     * These are items Vanilla placed into the chest via hopper transfer.
+     * Items are first merged by type so that multiple stacks of the same
+     * material (placed into different slots by Vanilla) are stored as a
+     * single DSU entry rather than creating duplicate template entries.
      */
     private void absorb(Inventory dsu) {
-        boolean anyStored = false;
+        // Pass 1: collect all stray items by slot, merge identical types
+        // into one representative ItemStack per type so addToDSUSilent only
+        // sees each type once and cannot create split template entries.
+        Map<Integer, ItemStack> slotMap = new HashMap<>();   // slot -> original slot ref for cleanup
+        Map<String, ItemStack>  merged  = new HashMap<>();   // typeKey -> merged stack to store
+
         for (int i = 0; i < dsu.getSize(); i++) {
             if (PERSISTENT_DSU_SLOTS.contains(i)) continue;
             ItemStack slot = dsu.getItem(i);
             if (slot == null || slot.getType() == Material.AIR) continue;
             if (!hasNoMeta(slot)) continue;
 
-            ItemStack toStore = slot.clone();
-            DSUManager.addToDSUSilent(toStore, dsu);
-            int stored = slot.getAmount() - toStore.getAmount();
-
-            log.info("[DSU-ABSORB] slot=" + i + " type=" + slot.getType()
-                    + " amt=" + slot.getAmount() + " stored=" + stored);
-
-            if (stored <= 0) continue;
-            anyStored = true;
-            dsu.setItem(i, toStore.getAmount() <= 0 ? null : toStore);
+            slotMap.put(i, slot);
+            String key = slot.getType().name();
+            if (merged.containsKey(key)) {
+                merged.get(key).setAmount(merged.get(key).getAmount() + slot.getAmount());
+            } else {
+                merged.put(key, slot.clone());
+            }
         }
+
+        if (merged.isEmpty()) return;
+
+        // Pass 2: store merged stacks into DSU containers
+        boolean anyStored = false;
+        for (ItemStack toStore : merged.values()) {
+            int before = toStore.getAmount();
+            DSUManager.addToDSUSilent(toStore, dsu);
+            int stored = before - toStore.getAmount();
+            log.info("[DSU-ABSORB] type=" + toStore.getType() + " attempted=" + before + " stored=" + stored);
+            if (stored > 0) anyStored = true;
+        }
+
+        // Pass 3: remove exactly what was stored from the physical slots
+        for (Map.Entry<Integer, ItemStack> entry : slotMap.entrySet()) {
+            int slot = entry.getKey();
+            ItemStack original = entry.getValue();
+            String key = original.getType().name();
+            ItemStack mergedStack = merged.get(key);
+            if (mergedStack == null) continue;
+
+            // mergedStack.getAmount() is whatever was NOT stored (remainder).
+            // Distribute remainder back proportionally: clear all slots first,
+            // then put the leftover into the first slot of that type.
+            dsu.setItem(slot, null);
+        }
+
+        // Put any unstored remainder back into the first available free slot
+        for (ItemStack mergedStack : merged.values()) {
+            if (mergedStack.getAmount() <= 0) continue;
+            // DSU is full for this type — put remainder back
+            HashMap<Integer, ItemStack> leftover = dsu.addItem(mergedStack);
+            if (!leftover.isEmpty()) {
+                // Chest is completely full — drop or leave (should be extremely rare)
+                log.warning("[DSU-ABSORB] Could not return remainder for " + mergedStack.getType() + " x" + mergedStack.getAmount());
+            }
+        }
+
         if (anyStored) {
             main.dsuupdatemanager.updateItemsExact(dsu);
         }
