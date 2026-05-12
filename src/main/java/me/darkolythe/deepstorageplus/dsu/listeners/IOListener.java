@@ -22,6 +22,7 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Logger;
 
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.hasNoMeta;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpeedUpgrade;
@@ -29,19 +30,12 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpee
 public class IOListener implements Listener {
 
     private final DeepStoragePlus main;
-
-    /**
-     * Per-hopper-location tick gate.
-     * Key   = location string of the hopper (source)
-     * Value = server tick at which we last processed a transfer
-     *
-     * This prevents the event from firing multiple times per tick for the
-     * same hopper and overcounting items.
-     */
+    private final Logger log;
     private final Map<String, Long> lastInputTick = new HashMap<>();
 
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin;
+        this.log = plugin.getLogger();
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -86,7 +80,6 @@ public class IOListener implements Listener {
 
         if (!dsuIsSource && !dsuIsDest) return;
 
-        // Never move plugin/meta items in either direction
         if (!hasNoMeta(event.getItem())) {
             event.setCancelled(true);
             return;
@@ -99,65 +92,73 @@ public class IOListener implements Listener {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // INPUT: hopper -> DSU
-    //
-    // Always cancel vanilla. Use a per-location tick gate to ensure we process
-    // at most ONE transfer per server tick per hopper, regardless of how many
-    // times Bukkit fires the event for the same hopper in the same tick.
-    // -----------------------------------------------------------------------
     private void handleInput(InventoryMoveItemEvent event, Inventory hopper, Inventory dsu) {
         event.setCancelled(true);
 
-        // Tick gate: skip duplicate events for the same hopper in the same tick
         Location hopperLoc = hopper.getLocation();
-        String key = hopperLoc != null ? locKey(hopperLoc) : null;
+        String key = hopperLoc != null ? locKey(hopperLoc) : "unknown";
         long currentTick = main.getServer().getCurrentTick();
-        if (key != null) {
-            Long last = lastInputTick.get(key);
-            if (last != null && last == currentTick) {
-                return; // already handled this hopper this tick
-            }
-            lastInputTick.put(key, currentTick);
-            // Prune old entries to avoid memory leak (keep map small)
-            if (lastInputTick.size() > 512) {
-                lastInputTick.entrySet().removeIf(e -> e.getValue() < currentTick - 40);
-            }
+
+        Long last = lastInputTick.get(key);
+        log.info("[HOPPER-IN DEBUG] tick=" + currentTick + " key=" + key
+                + " lastTick=" + last
+                + " eventItem=" + event.getItem().getType()
+                + " eventItemAmt=" + event.getItem().getAmount());
+
+        if (last != null && last == currentTick) {
+            log.info("[HOPPER-IN DEBUG] -> SKIPPED (duplicate tick)");
+            return;
+        }
+        lastInputTick.put(key, currentTick);
+        if (lastInputTick.size() > 512) {
+            lastInputTick.entrySet().removeIf(e -> e.getValue() < currentTick - 40);
         }
 
-        // Find the first valid hopper slot (same order as vanilla: slot 0 first)
+        // Log all hopper slots
+        for (int i = 0; i < hopper.getSize(); i++) {
+            ItemStack s = hopper.getItem(i);
+            log.info("[HOPPER-IN DEBUG] hopperSlot[" + i + "] = "
+                    + (s == null ? "null" : s.getType() + "x" + s.getAmount())
+                    + " hasNoMeta=" + (s != null && hasNoMeta(s)));
+        }
+
         for (int i = 0; i < hopper.getSize(); i++) {
             ItemStack slot = hopper.getItem(i);
             if (slot == null || slot.getType() == Material.AIR) continue;
             if (!hasNoMeta(slot)) continue;
 
-            // Build a clean 1-item stack to store
             ItemStack toStore = new ItemStack(slot.getType(), 1);
-
             int before = toStore.getAmount();
             DSUManager.addToDSUSilent(toStore, dsu);
             int stored = before - toStore.getAmount();
 
-            if (stored <= 0) return; // no space in DSU
+            log.info("[HOPPER-IN DEBUG] -> trying slot " + i + " type=" + slot.getType()
+                    + " hopperAmt=" + slot.getAmount()
+                    + " stored=" + stored
+                    + " toStoreAmtAfter=" + toStore.getAmount());
 
-            // Remove exactly 1 from this slot by index
+            if (stored <= 0) {
+                log.info("[HOPPER-IN DEBUG] -> DSU full/no container, aborting");
+                return;
+            }
+
+            int amtBefore = slot.getAmount();
             if (slot.getAmount() <= 1) {
                 hopper.setItem(i, null);
             } else {
                 slot.setAmount(slot.getAmount() - 1);
                 hopper.setItem(i, slot);
             }
+            log.info("[HOPPER-IN DEBUG] -> removed 1 from slot " + i
+                    + " was=" + amtBefore + " now=" + (hopper.getItem(i) == null ? 0 : hopper.getItem(i).getAmount()));
 
             main.dsuupdatemanager.updateItemsExact(dsu);
             return;
         }
+
+        log.info("[HOPPER-IN DEBUG] -> no valid slot found in hopper");
     }
 
-    // -----------------------------------------------------------------------
-    // OUTPUT: DSU -> hopper
-    // Cancel vanilla (it would pull display items with DSU lore).
-    // Take 1 from DSU via DSUManager and give a clean vanilla item to hopper.
-    // -----------------------------------------------------------------------
     private void handleOutput(InventoryMoveItemEvent event, Inventory dsu, Inventory hopper) {
         event.setCancelled(true);
 
