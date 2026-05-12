@@ -63,10 +63,16 @@ public class IOListener implements Listener {
     }
 
     /**
-     * Vanilla hopper behaviour for DSU:
-     * - Block plugin/meta items (storage containers, IO settings, etc.) from being moved
-     * - For INPUT: only allow into safe slots (not col 7 or col 8)
-     * - For OUTPUT: allow vanilla pull, just not plugin items (already covered above)
+     * Hopper IO for DSU.
+     *
+     * INPUT  (hopper -> DSU):
+     *   Always cancel vanilla. Take the item from the specific hopper slot,
+     *   add it to the DSU storage containers via DSUManager, then update display.
+     *
+     * OUTPUT (DSU -> hopper):
+     *   Always cancel vanilla (vanilla would pull display-items with DSU lore).
+     *   Instead, find the first item stored in the DSU containers, take 1 from
+     *   DSUManager, give a clean vanilla ItemStack to the hopper.
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onHopperMove(InventoryMoveItemEvent event) {
@@ -78,48 +84,82 @@ public class IOListener implements Listener {
 
         if (!dsuIsSource && !dsuIsDest) return;
 
-        // Never move plugin/meta items in either direction
-        if (!hasNoMeta(event.getItem())) {
-            event.setCancelled(true);
-            return;
-        }
+        // Always cancel — we handle everything ourselves
+        event.setCancelled(true);
 
         if (dsuIsDest) {
-            // INPUT: vanilla would push into any slot including col 7/8 — handle ourselves
-            event.setCancelled(true);
-            ItemStack item = event.getItem();
-            for (int i = 0; i < dest.getSize(); i++) {
-                if (i % 9 == 7 || i % 9 == 8) continue; // protected columns
-                ItemStack slot = dest.getItem(i);
-                if (slot == null || slot.getType() == Material.AIR) {
-                    dest.setItem(i, item.clone());
-                    removeAmountFrom(source, item, item.getAmount());
-                    main.dsuupdatemanager.updateItemsExact(dest);
-                    return;
-                }
-                if (slot.isSimilar(item) && slot.getAmount() < slot.getMaxStackSize()) {
-                    int toAdd = Math.min(slot.getMaxStackSize() - slot.getAmount(), item.getAmount());
-                    slot.setAmount(slot.getAmount() + toAdd);
-                    dest.setItem(i, slot);
-                    removeAmountFrom(source, item, toAdd);
-                    main.dsuupdatemanager.updateItemsExact(dest);
-                    return;
-                }
-            }
+            handleInput(source, dest);
+        } else {
+            handleOutput(source, dest);
         }
-        // OUTPUT (dsuIsSource): vanilla handles it — no cancel, item already checked for no meta above
     }
 
-    private void removeAmountFrom(Inventory inv, ItemStack template, int amount) {
-        int remaining = amount;
-        for (int i = 0; i < inv.getSize() && remaining > 0; i++) {
-            ItemStack slot = inv.getItem(i);
-            if (slot == null || !slot.isSimilar(template)) continue;
-            int take = Math.min(remaining, slot.getAmount());
-            slot.setAmount(slot.getAmount() - take);
-            if (slot.getAmount() <= 0) inv.setItem(i, null);
-            else inv.setItem(i, slot);
-            remaining -= take;
+    // -----------------------------------------------------------------------
+    // INPUT: hopper -> DSU
+    // Take 1 item from the first non-empty hopper slot, add to DSU containers.
+    // -----------------------------------------------------------------------
+    private void handleInput(Inventory hopper, Inventory dsu) {
+        for (int i = 0; i < hopper.getSize(); i++) {
+            ItemStack slot = hopper.getItem(i);
+            if (slot == null || slot.getType() == Material.AIR) continue;
+            // Never move plugin items
+            if (!hasNoMeta(slot)) continue;
+
+            // Take exactly 1 (vanilla hopper moves 1 per tick)
+            ItemStack toAdd = slot.clone();
+            toAdd.setAmount(1);
+
+            // Try to add to DSU
+            boolean stored = DSUManager.addToDSUSilent(toAdd, dsu);
+            if (!stored) return; // No space in DSU
+
+            // Remove 1 from hopper slot
+            if (slot.getAmount() <= 1) {
+                hopper.setItem(i, null);
+            } else {
+                slot.setAmount(slot.getAmount() - 1);
+                hopper.setItem(i, slot);
+            }
+
+            main.dsuupdatemanager.updateItemsExact(dsu);
+            return; // One item per hopper tick
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // OUTPUT: DSU -> hopper
+    // Find the first item stored in DSU containers, give a clean vanilla
+    // ItemStack (amount=1, no DSU lore) to the hopper.
+    // -----------------------------------------------------------------------
+    private void handleOutput(Inventory dsu, Inventory hopper) {
+        // Find the first stored item template in any container
+        for (ItemStack template : DSUManager.getTotalTemplates(dsu)) {
+            if (template == null || template.getType() == Material.AIR) continue;
+
+            // Build a clean vanilla item (template from DSUManager has no DSU lore)
+            ItemStack give = template.clone();
+            give.setAmount(1);
+
+            // Check if hopper can accept it
+            if (!canAddToInventory(hopper, give)) continue;
+
+            // Take 1 from DSU storage
+            int taken = DSUManager.takeItems(template, dsu, 1);
+            if (taken <= 0) continue;
+
+            // Give the clean item to the hopper
+            hopper.addItem(give);
+            main.dsuupdatemanager.updateItemsExact(dsu);
+            return; // One item per hopper tick
+        }
+    }
+
+    /** Returns true if the inventory has space for at least 1 of the given item. */
+    private boolean canAddToInventory(Inventory inv, ItemStack item) {
+        for (ItemStack slot : inv.getContents()) {
+            if (slot == null || slot.getType() == Material.AIR) return true;
+            if (slot.isSimilar(item) && slot.getAmount() < slot.getMaxStackSize()) return true;
+        }
+        return false;
     }
 }
