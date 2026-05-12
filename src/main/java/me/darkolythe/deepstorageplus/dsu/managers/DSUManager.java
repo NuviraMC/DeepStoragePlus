@@ -21,7 +21,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.*;
-import java.util.logging.Logger;
 
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.*;
 
