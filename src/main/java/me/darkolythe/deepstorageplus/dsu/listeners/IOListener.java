@@ -62,18 +62,6 @@ public class IOListener implements Listener {
         }
     }
 
-    /**
-     * Hopper IO for DSU.
-     *
-     * INPUT  (hopper -> DSU):
-     *   Always cancel vanilla. Take the item from the specific hopper slot,
-     *   add it to the DSU storage containers via DSUManager, then update display.
-     *
-     * OUTPUT (DSU -> hopper):
-     *   Always cancel vanilla (vanilla would pull display-items with DSU lore).
-     *   Instead, find the first item stored in the DSU containers, take 1 from
-     *   DSUManager, give a clean vanilla ItemStack to the hopper.
-     */
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onHopperMove(InventoryMoveItemEvent event) {
         Inventory source = event.getSource();
@@ -84,77 +72,107 @@ public class IOListener implements Listener {
 
         if (!dsuIsSource && !dsuIsDest) return;
 
-        // Always cancel — we handle everything ourselves
-        event.setCancelled(true);
+        ItemStack moving = event.getItem();
+
+        // Never move plugin/meta items in either direction
+        if (!hasNoMeta(moving)) {
+            event.setCancelled(true);
+            return;
+        }
 
         if (dsuIsDest) {
-            handleInput(source, dest);
+            handleInput(event, source, dest, moving);
         } else {
-            handleOutput(source, dest);
+            handleOutput(event, source, dest);
         }
     }
 
     // -----------------------------------------------------------------------
     // INPUT: hopper -> DSU
-    // Take 1 item from the first non-empty hopper slot, add to DSU containers.
+    //
+    // Bukkit fires InventoryMoveItemEvent with the item it wants to move.
+    // We let vanilla believe the transfer happened (don't cancel) but redirect
+    // the item into DSU storage instead of a real inventory slot.
+    //
+    // Strategy:
+    //  1. Try to store 1x the item into DSU containers.
+    //  2. If successful: let vanilla remove it from the hopper by NOT cancelling,
+    //     but we redirect where it goes by cancelling the event and manually
+    //     removing from source — this gives vanilla its cooldown tick so it
+    //     won't fire again immediately.
+    //  3. If DSU is full: cancel so hopper keeps its cooldown (stops retry storm).
     // -----------------------------------------------------------------------
-    private void handleInput(Inventory hopper, Inventory dsu) {
+    private void handleInput(InventoryMoveItemEvent event, Inventory hopper, Inventory dsu, ItemStack moving) {
+        // Clone with amount=1 (hopper moves 1 per tick)
+        ItemStack toStore = moving.clone();
+        toStore.setAmount(1);
+
+        boolean stored = DSUManager.addToDSUSilent(toStore, dsu);
+
+        if (!stored) {
+            // DSU full — cancel so hopper gets its transfer cooldown
+            // and doesn't spam the event
+            event.setCancelled(true);
+            return;
+        }
+
+        // Successfully stored: cancel vanilla (so item doesn't go into a real slot)
+        // and manually remove 1 from the hopper source slot
+        event.setCancelled(true);
+        removeOneFromSource(hopper, moving);
+        main.dsuupdatemanager.updateItemsExact(dsu);
+    }
+
+    /**
+     * Removes exactly 1 of the matching item from the hopper.
+     * Matches by type + amount-independent equality (isSimilar),
+     * but hopper items are plain vanilla so isSimilar is safe here.
+     */
+    private void removeOneFromSource(Inventory hopper, ItemStack template) {
         for (int i = 0; i < hopper.getSize(); i++) {
             ItemStack slot = hopper.getItem(i);
             if (slot == null || slot.getType() == Material.AIR) continue;
-            // Never move plugin items
-            if (!hasNoMeta(slot)) continue;
+            // Match by material only for plain items; isSimilar for items with meta
+            boolean matches = slot.getType() == template.getType() &&
+                    ((slot.getItemMeta() == null && template.getItemMeta() == null) ||
+                            slot.isSimilar(template));
+            if (!matches) continue;
 
-            // Take exactly 1 (vanilla hopper moves 1 per tick)
-            ItemStack toAdd = slot.clone();
-            toAdd.setAmount(1);
-
-            // Try to add to DSU
-            boolean stored = DSUManager.addToDSUSilent(toAdd, dsu);
-            if (!stored) return; // No space in DSU
-
-            // Remove 1 from hopper slot
             if (slot.getAmount() <= 1) {
                 hopper.setItem(i, null);
             } else {
                 slot.setAmount(slot.getAmount() - 1);
                 hopper.setItem(i, slot);
             }
-
-            main.dsuupdatemanager.updateItemsExact(dsu);
-            return; // One item per hopper tick
+            return;
         }
     }
 
     // -----------------------------------------------------------------------
     // OUTPUT: DSU -> hopper
-    // Find the first item stored in DSU containers, give a clean vanilla
-    // ItemStack (amount=1, no DSU lore) to the hopper.
+    // Cancel vanilla (it would pull display items with DSU lore).
+    // Take 1 from DSU via DSUManager and give a clean vanilla item to hopper.
     // -----------------------------------------------------------------------
-    private void handleOutput(Inventory dsu, Inventory hopper) {
-        // Find the first stored item template in any container
+    private void handleOutput(InventoryMoveItemEvent event, Inventory dsu, Inventory hopper) {
+        event.setCancelled(true);
+
         for (ItemStack template : DSUManager.getTotalTemplates(dsu)) {
             if (template == null || template.getType() == Material.AIR) continue;
 
-            // Build a clean vanilla item (template from DSUManager has no DSU lore)
             ItemStack give = template.clone();
             give.setAmount(1);
 
-            // Check if hopper can accept it
             if (!canAddToInventory(hopper, give)) continue;
 
-            // Take 1 from DSU storage
             int taken = DSUManager.takeItems(template, dsu, 1);
             if (taken <= 0) continue;
 
-            // Give the clean item to the hopper
             hopper.addItem(give);
             main.dsuupdatemanager.updateItemsExact(dsu);
-            return; // One item per hopper tick
+            return;
         }
     }
 
-    /** Returns true if the inventory has space for at least 1 of the given item. */
     private boolean canAddToInventory(Inventory inv, ItemStack item) {
         for (ItemStack slot : inv.getContents()) {
             if (slot == null || slot.getType() == Material.AIR) return true;
