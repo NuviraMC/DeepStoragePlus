@@ -168,20 +168,26 @@ public class DSUUpdateManager {
         return new ArrayList<>(DSUManager.getTotalTemplates(inv));
     }
 
+    private static final String ITEM_COUNT_PREFIX = ChatColor.GRAY + "Item Count: ";
 
     public static ItemStack createItem(ItemStack template, Inventory inv) {
         ItemStack item = template == null ? new ItemStack(Material.AIR) : template.clone();
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
+            // Build lore from scratch: copy original lore lines, skipping any
+            // previously injected "Item Count:" lines to prevent duplicates.
             List<String> lore = new ArrayList<>();
             if (meta.hasLore() && meta.getLore() != null) {
-                lore.addAll(meta.getLore());
+                for (String line : meta.getLore()) {
+                    if (!line.startsWith(ITEM_COUNT_PREFIX)) {
+                        lore.add(line);
+                    }
+                }
             }
-            lore.add(ChatColor.GRAY + "Item Count: " + DSUManager.getTotalItemAmount(inv, template));
+            lore.add(ITEM_COUNT_PREFIX + DSUManager.getTotalItemAmount(inv, template));
             meta.setLore(lore);
             item.setItemMeta(meta);
         }
-
         return item;
     }
 }
