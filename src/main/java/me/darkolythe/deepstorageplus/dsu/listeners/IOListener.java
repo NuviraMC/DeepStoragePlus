@@ -28,9 +28,13 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpee
 
 public class IOListener implements Listener {
 
+    // DSU inventory slots that belong to the plugin and must never be touched
+    // Layout: wall=7,16,25,34,43,52 | container=8,17,26,35,44 | io=53
+    private static final Set<Integer> PLUGIN_SLOTS = Set.of(7, 8, 16, 17, 25, 26, 34, 35, 43, 44, 52, 53);
+
     private final DeepStoragePlus main;
-    // Tracks hopper locations currently scheduled for a follow-up drain
-    private final Set<String> scheduledDrains = new HashSet<>();
+    // Prevents scheduling multiple rescue tasks for the same DSU location
+    private final Set<String> scheduledRescues = new HashSet<>();
 
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin;
@@ -93,27 +97,55 @@ public class IOListener implements Listener {
     private void handleInput(InventoryMoveItemEvent event, Inventory hopper, Inventory dsu) {
         event.setCancelled(true);
 
-        // Drain the entire hopper into the DSU immediately
+        // Drain entire hopper into DSU right now
         drainHopperToDSU(hopper, dsu);
 
-        // Schedule a follow-up drain 1 tick later — Vanilla may move remaining
-        // items into the chest without firing another event after setCancelled(true)
-        Location hopperLoc = hopper.getLocation();
-        if (hopperLoc == null) return;
-        String key = locKey(hopperLoc);
-        if (scheduledDrains.contains(key)) return;
-        scheduledDrains.add(key);
+        // Vanilla sometimes writes items directly into the physical chest slots
+        // without firing another event. Rescue those items 1 tick later.
+        Location dsuLoc = dsu.getLocation();
+        if (dsuLoc == null) return;
+        String key = locKey(dsuLoc);
+        if (scheduledRescues.contains(key)) return;
+        scheduledRescues.add(key);
 
         main.getServer().getScheduler().runTaskLater(main, () -> {
-            scheduledDrains.remove(key);
-            if (hopperLoc.getWorld() == null) return;
-            Location dsuLoc = dsu.getLocation();
-            if (dsuLoc == null) return;
-            Block dsuBlock = dsuLoc.getBlock();
-            if (!(dsuBlock.getState() instanceof Chest dsuChest)) return;
-            Inventory freshDsu = dsuChest.getInventory();
+            scheduledRescues.remove(key);
+            if (dsuLoc.getWorld() == null) return;
+            Block block = dsuLoc.getBlock();
+            if (!(block.getState() instanceof Chest chest)) return;
+            Inventory freshDsu = chest.getInventory();
             if (!StorageUtils.isDSU(freshDsu)) return;
-            drainHopperToDSU(hopper, freshDsu);
+
+            // Rescue any non-plugin items that Vanilla smuggled into the chest slots
+            boolean anyRescued = false;
+            for (int i = 0; i < freshDsu.getSize(); i++) {
+                if (PLUGIN_SLOTS.contains(i)) continue;
+                ItemStack slot = freshDsu.getItem(i);
+                if (slot == null || slot.getType() == Material.AIR) continue;
+                if (!hasNoMeta(slot)) continue;
+
+                ItemStack toStore = slot.clone();
+                DSUManager.addToDSUSilent(toStore, freshDsu);
+                int stored = slot.getAmount() - toStore.getAmount();
+                if (stored <= 0) continue;
+
+                anyRescued = true;
+                if (toStore.getAmount() <= 0) {
+                    freshDsu.setItem(i, null);
+                } else {
+                    freshDsu.setItem(i, toStore);
+                }
+            }
+
+            // Also drain the hopper again in case it refilled
+            Location hopperLoc = hopper.getLocation();
+            if (hopperLoc != null) {
+                drainHopperToDSU(hopper, freshDsu);
+            }
+
+            if (anyRescued) {
+                main.dsuupdatemanager.updateItemsExact(freshDsu);
+            }
         }, 1L);
     }
 
