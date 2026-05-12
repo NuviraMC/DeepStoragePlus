@@ -271,9 +271,15 @@ public class DSUManager {
         if (amount != null) {
             return amount;
         }
+        // Legacy lore fallback: skip "empty" lines to avoid NumberFormatException
         List<String> lore = meta.getLore();
         if (lore != null && lore.size() > 2 + slot) {
-            return getMaterialAmount(lore.get(2 + slot));
+            String loreLine = lore.get(2 + slot);
+            String emptyKey = LanguageManager.getValue("empty");
+            if (emptyKey != null && loreLine.contains(emptyKey)) {
+                return 0;
+            }
+            return getMaterialAmount(loreLine);
         }
         return 0;
     }
@@ -522,12 +528,20 @@ public class DSUManager {
     }
 
     /*
-    Get the amount of material being stored on the one line of lore in a container
+    Get the amount of material being stored on the one line of lore in a container.
+    Returns 0 if the last token is not a valid integer (e.g. "empty").
      */
     private static int getMaterialAmount(String str) {
-        int len = str.split("\\s+").length;
-        String matAmt = str.split("\\s+")[len - 1];
-        return Integer.parseInt(matAmt);
+        if (str == null || str.isBlank()) {
+            return 0;
+        }
+        String[] parts = str.split("\\s+");
+        String matAmt = parts[parts.length - 1];
+        try {
+            return Integer.parseInt(matAmt);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     public static int getTotalItemAmount(Inventory inv, ItemStack template) {
