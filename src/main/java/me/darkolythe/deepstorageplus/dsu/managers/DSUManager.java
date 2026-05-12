@@ -38,9 +38,25 @@ public class DSUManager {
         if (item == null || player == null) {
             return;
         }
-        boolean isvaliditem = addToDSU(item, player.getOpenInventory().getTopInventory(), player); //try to add item to dsu
-        main.dsuupdatemanager.updateItemsExact(player.getOpenInventory().getTopInventory());
-        if (item.getAmount() > 0 && isvaliditem) {
+        Inventory topInv = player.getOpenInventory().getTopInventory();
+
+        // Check if at least one storage container is present
+        boolean hasContainer = false;
+        for (int i = 0; i < 5; i++) {
+            ItemStack container = topInv.getItem(8 + (9 * i));
+            if (ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
+                hasContainer = true;
+                break;
+            }
+        }
+        if (!hasContainer) {
+            player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("nocontainer"));
+            return;
+        }
+
+        boolean allStored = addToDSU(item, topInv, player);
+        main.dsuupdatemanager.updateItemsExact(topInv);
+        if (!allStored && item.getAmount() > 0) {
             player.sendMessage(DeepStoragePlus.prefix + ChatColor.RED + LanguageManager.getValue("containersfull"));
         }
     }
@@ -271,7 +287,7 @@ public class DSUManager {
         if (amount != null) {
             return amount;
         }
-        // Legacy lore fallback: skip "empty" lines to avoid NumberFormatException
+        // Legacy lore fallback
         List<String> lore = meta.getLore();
         if (lore != null && lore.size() > 2 + slot) {
             String loreLine = lore.get(2 + slot);
@@ -358,7 +374,7 @@ public class DSUManager {
     }
 
     /*
-    Get the remaining data in a container by passing it a type field. Data or Type. (not literal strings)
+    Get the remaining data in a container by passing it a type field.
      */
     private static int countStorage(ItemStack container, String typeString) {
         int spaceTotal = 0;
@@ -380,9 +396,6 @@ public class DSUManager {
         return spaceTotal - spaceCur;
     }
 
-    /*
-    Get the data portion of the lore string. Format: Type: data
-     */
     private static String getData(String lore) {
         int colon = lore.indexOf(':');
         if (colon < 0 || colon + 1 >= lore.length()) {
@@ -391,25 +404,16 @@ public class DSUManager {
         return lore.substring(colon + 1).trim();
     }
 
-    /*
-    Get the current data in the storage info format: Type: cur/max
-     */
     private static int getCurrentData(String data) {
         int slash = data.indexOf('/');
         return Integer.parseInt((slash >= 0 ? data.substring(0, slash) : data).trim());
     }
 
-    /*
-    Get the max data in the storage info format: Type: cur/max
-     */
     private static int getMaxData(String data) {
         int slash = data.indexOf('/');
         return Integer.parseInt((slash >= 0 ? data.substring(slash + 1) : data).trim());
     }
 
-    /*
-    Get the list of types that a container has
-     */
     public static HashSet<Material> getTypes(List<String> lore) {
         LinkedHashSet<Material> list = new LinkedHashSet<>();
         if (lore == null) {
@@ -426,9 +430,6 @@ public class DSUManager {
         return list;
     }
 
-    /*
-    Get the type of Material from a specific lore line of a Storage Container
-     */
     private static Material getType(String lore) {
         String cleaned = lore.replace(ChatColor.WHITE + " - ", "").trim();
         int lastSpace = cleaned.lastIndexOf(' ');
@@ -440,25 +441,15 @@ public class DSUManager {
     Update the container with the itemstack being added
      */
     public static void addDataToContainer(ItemStack container, ItemStack item) {
-        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
-        boolean debugMode = plugin != null && plugin.getConfig().getBoolean("debug", false);
-
         if (container == null || item == null) {
-            if (debugMode) plugin.getLogger().info("[DSU STORE] SKIP: container=" + container + ", item=" + item);
             return;
         }
-        boolean isContainer = ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER);
-        if (debugMode) plugin.getLogger().info("[DSU STORE] container=" + container.getType()
-                + ", isGroup=" + isContainer
-                + ", itemId=" + ItemList.getItemId(container)
-                + ", item=" + item.getType() + "x" + item.getAmount());
-        if (!isContainer) return;
+        if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) return;
 
         int amount = item.getAmount();
         String storageKey = LanguageManager.getValue("currentstorage") + ": ";
         int storage = countStorage(container, storageKey);
         int canAdd = Math.min(storage, amount);
-        if (debugMode) plugin.getLogger().info("[DSU STORE] storage=" + storage + ", canAdd=" + canAdd);
         if (canAdd <= 0) {
             return;
         }
@@ -467,7 +458,6 @@ public class DSUManager {
         if (slot < 0) {
             slot = findEmptySlot(container);
             if (slot < 0) {
-                if (debugMode) plugin.getLogger().info("[DSU STORE] no empty slot found");
                 return;
             }
             setStoredTemplate(container, slot, item.clone());
@@ -478,7 +468,6 @@ public class DSUManager {
         setStoredAmount(container, slot, current + canAdd);
         item.setAmount(amount - canAdd);
         rewriteContainerLore(container);
-        if (debugMode) plugin.getLogger().info("[DSU STORE] stored " + canAdd + " of " + item.getType() + ", remaining=" + item.getAmount());
     }
 
     /*
@@ -488,25 +477,19 @@ public class DSUManager {
         if (toAdd == null || inv == null || player == null || ItemList.isPluginItem(toAdd)) {
             return false;
         }
-        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
-        boolean debugMode = plugin != null && plugin.getConfig().getBoolean("debug", false);
         for (int i = 0; i < 5; i++) {
-            if (toAdd.getAmount() > 0) {
-                int containerSlot = 8 + (9 * i);
-                ItemStack container = inv.getItem(containerSlot);
-                if (debugMode) plugin.getLogger().info("[DSU ADD] slot=" + containerSlot + ", container=" + (container != null ? container.getType() : "null") + ", isGroup=" + ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER));
-                if (container == null) continue;
-                addDataToContainer(container, toAdd);
-                inv.setItem(containerSlot, container);
-            } else {
-                break;
-            }
+            if (toAdd.getAmount() <= 0) break;
+            int containerSlot = 8 + (9 * i);
+            ItemStack container = inv.getItem(containerSlot);
+            if (container == null) continue;
+            addDataToContainer(container, toAdd);
+            inv.setItem(containerSlot, container);
         }
         return toAdd.getAmount() <= 0;
     }
 
     /*
-    This method loops until the item trying to be added is either done being added, or the containers run out of memory.
+    Silent variant used by hoppers / internal code (no player message).
      */
     public static boolean addToDSUSilent(ItemStack toAdd, Inventory inv) {
         if (toAdd == null || inv == null || ItemList.isPluginItem(toAdd)) {
@@ -515,22 +498,14 @@ public class DSUManager {
         for (int i = 0; i < 5; i++) {
             int containerSlot = 8 + (9 * i);
             ItemStack container = inv.getItem(containerSlot);
-            if (container == null) {
-                continue;
-            }
+            if (container == null) continue;
             addDataToContainer(container, toAdd);
             inv.setItem(containerSlot, container);
-            if (toAdd.getAmount() < 1) {
-                break;
-            }
+            if (toAdd.getAmount() < 1) break;
         }
         return toAdd.getAmount() <= 0;
     }
 
-    /*
-    Get the amount of material being stored on the one line of lore in a container.
-    Returns 0 if the last token is not a valid integer (e.g. "empty").
-     */
     private static int getMaterialAmount(String str) {
         if (str == null || str.isBlank()) {
             return 0;
@@ -552,9 +527,7 @@ public class DSUManager {
         ItemStack normalized = normalize(template);
         for (int i = 0; i < 5; i++) {
             ItemStack container = inv.getItem(8 + (9 * i));
-            if (container == null) {
-                continue;
-            }
+            if (container == null) continue;
             ItemMeta meta = container.getItemMeta();
             List<String> lore = meta != null ? meta.getLore() : null;
             int slots = getTypeSlotCount(lore);
@@ -568,9 +541,6 @@ public class DSUManager {
         return amount;
     }
 
-    /*
-    Get a complete list of types in a DSU
-     */
     public static Set<ItemStack> getTotalTemplates(Inventory dsu) {
         LinkedHashSet<ItemStack> list = new LinkedHashSet<>();
         if (dsu == null) {
@@ -578,9 +548,7 @@ public class DSUManager {
         }
         for (int i = 0; i < 5; i++) {
             ItemStack container = dsu.getItem(8 + (9 * i));
-            if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
-                continue;
-            }
+            if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) continue;
             ItemMeta meta = container.getItemMeta();
             List<String> lore = meta != null ? meta.getLore() : null;
             int slots = getTypeSlotCount(lore);
@@ -604,7 +572,6 @@ public class DSUManager {
         return false;
     }
 
-
     public static int takeItems(ItemStack template, Inventory inv, int amt) {
         if (inv == null || template == null) {
             return 0;
@@ -615,9 +582,7 @@ public class DSUManager {
         for (int i = 4; i >= 0 && remaining > 0; i--) {
             int containerSlot = 8 + (9 * i);
             ItemStack container = inv.getItem(containerSlot);
-            if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
-                continue;
-            }
+            if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) continue;
             ItemMeta meta = container.getItemMeta();
             List<String> lore = meta != null ? meta.getLore() : null;
             int slots = getTypeSlotCount(lore);

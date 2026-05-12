@@ -36,7 +36,7 @@ public class IOListener implements Listener {
 
     private final DeepStoragePlus main;
     public IOListener(DeepStoragePlus plugin) {
-        this.main = plugin; // set it equal to an instance of main
+        this.main = plugin;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -82,8 +82,6 @@ public class IOListener implements Listener {
 
             ItemStack IOSettings;
             Inventory IOInv;
-            ItemStack input;
-            ItemStack output;
             String IOStatus = "input";
 
             if (initial.getSize() == 54) {
@@ -97,14 +95,14 @@ public class IOListener implements Listener {
 
             if (StorageUtils.isDSU(IOInv)) {
                 if (IOSettings == null || !ItemList.isItem(IOSettings, ItemList.KEY_IO_SETTINGS)) {
-                    return; // kein IO-Setup -> normale Hopper-Logik zulassen
+                    return;
                 }
                 if (!hasNoMeta(moveItem)) {
-                    return; // Plugin-Items nie via Hopper verschieben
+                    return;
                 }
 
-                input = getInput(IOSettings);
-                output = getOutput(IOSettings);
+                ItemStack input = getInput(IOSettings);
+                ItemStack output = getOutput(IOSettings);
 
                 int amt = getSpeedUpgrade(IOSettings);
 
@@ -112,10 +110,11 @@ public class IOListener implements Listener {
 
                 if (IOStatus.equals("input")) {
                     lookForItemInHopper(initial, dest, input, amt + 1);
-                    return;
                 } else {
-                    lookForItemInChest(output, initial, dest, moveItem, amt + 1);
-                    return;
+                    // Only attempt output if an output type is actually configured
+                    if (output != null && output.getType() != Material.AIR) {
+                        lookForItemInChest(output, initial, dest, amt + 1);
+                    }
                 }
             } else if (StorageUtils.isSorter(IOInv)) {
                 if (IOStatus.equals("input")) {
@@ -189,76 +188,74 @@ public class IOListener implements Listener {
         return parsed == Material.AIR ? null : new ItemStack(parsed);
     }
 
+    /**
+     * Hopper -> DSU: pulls items from hopper slots into the DSU containers.
+     * Overflow (items that don't fit) stays in the hopper slot.
+     */
     private void lookForItemInHopper(Inventory initial, Inventory dest, ItemStack input, int amt) {
         Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
-            boolean moved_stack = false;
             for (int i = 0; i < 5; i++) {
-                if (!moved_stack) {
-                    ItemStack toMove = initial.getItem(i);
-                    if (toMove != null && (input == null || input.isSimilar(toMove))) {
-                        ItemStack moving = toMove.clone();
-                        moving.setAmount(Math.min(amt, toMove.getAmount()));
-                        if (hasNoMeta(moving)) { //items being stored cannot have any special features. ie: damage, enchants, name, lore.
-                            for (int j = 0; j < 5; j++) {
-                                if (moving.getAmount() > 0) { //if the item amount is greater than 0, it means there are still items to put in the containers
-                                    ItemStack container = dest.getItem(8 + (9 * j));
-                                    if (container == null) {
-                                        continue;
-                                    }
-                                    addDataToContainer(container, moving); //add the item to the current loop container
-                                    toMove.setAmount(toMove.getAmount() - (amt - moving.getAmount()));
+                ItemStack toMove = initial.getItem(i);
+                if (toMove == null || toMove.getType() == Material.AIR) continue;
+                if (input != null && !input.isSimilar(toMove)) continue;
+                if (!hasNoMeta(toMove)) continue;
 
-                                    main.dsuupdatemanager.updateItemsExact(dest);
-                                    moved_stack = true;
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
+                // How many we want to move this tick
+                int wantToMove = Math.min(amt, toMove.getAmount());
+
+                // Try to push into DSU containers
+                ItemStack moving = toMove.clone();
+                moving.setAmount(wantToMove);
+
+                // addToDSUSilent reduces moving.getAmount() by what was actually stored
+                boolean allStored = DSUManager.addToDSUSilent(moving, dest);
+                int actuallyStored = wantToMove - moving.getAmount();
+
+                if (actuallyStored > 0) {
+                    // Reduce the hopper slot by exactly how much was stored
+                    int remaining = toMove.getAmount() - actuallyStored;
+                    if (remaining <= 0) {
+                        initial.setItem(i, null);
+                    } else {
+                        toMove.setAmount(remaining);
                     }
+                    main.dsuupdatemanager.updateItemsExact(dest);
+                    return; // one stack per hopper tick
                 }
+                return; // no space in DSU
             }
         }, 1);
     }
 
-    private void lookForItemInChest(ItemStack output, Inventory initial, Inventory dest, ItemStack moveItem, int amt) {
+    /**
+     * DSU -> Hopper: pulls items from DSU containers into the hopper.
+     * Only pulls what actually fits into the hopper (overflow stays in DSU).
+     */
+    private void lookForItemInChest(ItemStack output, Inventory initial, Inventory dest, int amt) {
         Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> {
-
-            if (moveItem == null || output == null || output.getType() == Material.AIR) {
-                return;
-            }
-
             int totalAmount = DSUManager.getTotalItemAmount(initial, output);
-            int allowed_amt = Math.min(amt, totalAmount);
-            if (allowed_amt <= 0) {
+            int wantToMove = Math.min(amt, totalAmount);
+            if (wantToMove <= 0) {
                 return;
             }
 
-            for (int i = 0; i < 5; i++) {
-                ItemStack container = initial.getItem(8 + (9 * i));
-                if (container == null || container.getType() == Material.WHITE_STAINED_GLASS_PANE || !container.hasItemMeta()) {
-                    continue;
-                }
-                ItemMeta containerMeta = container.getItemMeta();
-                List<String> containerLore = containerMeta != null ? containerMeta.getLore() : null;
-                if (containerLore == null) {
-                    continue;
-                }
-                if (DSUManager.dsuContainsItem(initial, output)) {
-                    ItemStack toGive = output.clone();
-                    toGive.setAmount(allowed_amt);
-                    HashMap<Integer, ItemStack> items = dest.addItem(toGive);
-                    // subtract any item counts that cant fit into the output hopper
-                    int sub = 0;
-                    for (ItemStack overflow : items.values()) {
-                        sub += overflow.getAmount();
-                    }
-                    DSUManager.takeItems(output, initial, allowed_amt - sub);
+            ItemStack toGive = output.clone();
+            toGive.setAmount(wantToMove);
 
-                    main.dsuupdatemanager.updateItemsExact(initial);
-                    return;
-                }
+            // addItem returns overflow that didn't fit
+            HashMap<Integer, ItemStack> overflow = dest.addItem(toGive);
+            int overflowAmt = 0;
+            for (ItemStack leftover : overflow.values()) {
+                overflowAmt += leftover.getAmount();
             }
+
+            int actuallyMoved = wantToMove - overflowAmt;
+            if (actuallyMoved <= 0) {
+                return;
+            }
+
+            DSUManager.takeItems(output, initial, actuallyMoved);
+            main.dsuupdatemanager.updateItemsExact(initial);
         }, 1);
     }
 
@@ -266,9 +263,7 @@ public class IOListener implements Listener {
         String normalizedConfigured = normalizeToken(configuredKey);
         for (String line : lore) {
             String normalizedLine = normalizeToken(ChatColor.stripColor(line));
-            if (normalizedLine.isEmpty()) {
-                continue;
-            }
+            if (normalizedLine.isEmpty()) continue;
             if (!normalizedConfigured.isEmpty() && normalizedLine.startsWith(normalizedConfigured + ":")) {
                 return line;
             }
@@ -284,13 +279,9 @@ public class IOListener implements Listener {
 
     private static String extractIOValue(String line) {
         String stripped = ChatColor.stripColor(line);
-        if (stripped == null || stripped.isEmpty()) {
-            return "";
-        }
+        if (stripped == null || stripped.isEmpty()) return "";
         int idx = stripped.indexOf(':');
-        if (idx < 0 || idx + 1 >= stripped.length()) {
-            return stripped.trim();
-        }
+        if (idx < 0 || idx + 1 >= stripped.length()) return stripped.trim();
         return stripped.substring(idx + 1).trim();
     }
 
