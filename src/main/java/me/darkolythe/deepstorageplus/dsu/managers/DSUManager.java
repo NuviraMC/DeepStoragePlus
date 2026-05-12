@@ -470,7 +470,12 @@ public class DSUManager {
         }
         for (int i = 0; i < 5; i++) {
             if (toAdd.getAmount() > 0) {
-                addDataToContainer(inv.getItem(8 + (9 * i)), toAdd);
+                int containerSlot = 8 + (9 * i);
+                ItemStack container = inv.getItem(containerSlot);
+                if (container == null) continue;
+                addDataToContainer(container, toAdd);
+                // Write the modified container back into the inventory so PersistentData is not lost
+                inv.setItem(containerSlot, container);
             } else {
                 break;
             }
@@ -486,11 +491,14 @@ public class DSUManager {
             return false;
         }
         for (int i = 0; i < 5; i++) {
-            ItemStack container = inv.getItem(8 + (9 * i));
+            int containerSlot = 8 + (9 * i);
+            ItemStack container = inv.getItem(containerSlot);
             if (container == null) {
                 continue;
             }
             addDataToContainer(container, toAdd);
+            // Write the modified container back into the inventory so PersistentData is not lost
+            inv.setItem(containerSlot, container);
             if (toAdd.getAmount() < 1) {
                 break;
             }
@@ -576,7 +584,8 @@ public class DSUManager {
         int taken = 0;
         ItemStack normalized = normalize(template);
         for (int i = 4; i >= 0 && remaining > 0; i--) {
-            ItemStack container = inv.getItem(8 + (9 * i));
+            int containerSlot = 8 + (9 * i);
+            ItemStack container = inv.getItem(containerSlot);
             if (!ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
                 continue;
             }
@@ -597,6 +606,8 @@ public class DSUManager {
                     rewriteContainerLore(container);
                 }
             }
+            // Write the modified container back into the inventory so PersistentData is not lost
+            inv.setItem(containerSlot, container);
         }
         return taken;
     }
