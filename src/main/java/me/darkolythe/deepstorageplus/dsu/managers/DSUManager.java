@@ -434,13 +434,25 @@ public class DSUManager {
     Update the container with the itemstack being added
      */
     public static void addDataToContainer(ItemStack container, ItemStack item) {
-        if (container == null || item == null || !ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER)) {
+        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
+        boolean debugMode = plugin != null && plugin.getConfig().getBoolean("debug", false);
+
+        if (container == null || item == null) {
+            if (debugMode) plugin.getLogger().info("[DSU STORE] SKIP: container=" + container + ", item=" + item);
             return;
         }
+        boolean isContainer = ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER);
+        if (debugMode) plugin.getLogger().info("[DSU STORE] container=" + container.getType()
+                + ", isGroup=" + isContainer
+                + ", itemId=" + ItemList.getItemId(container)
+                + ", item=" + item.getType() + "x" + item.getAmount());
+        if (!isContainer) return;
 
         int amount = item.getAmount();
-        int storage = countStorage(container, LanguageManager.getValue("currentstorage") + ": ");
+        String storageKey = LanguageManager.getValue("currentstorage") + ": ";
+        int storage = countStorage(container, storageKey);
         int canAdd = Math.min(storage, amount);
+        if (debugMode) plugin.getLogger().info("[DSU STORE] storage=" + storage + ", canAdd=" + canAdd);
         if (canAdd <= 0) {
             return;
         }
@@ -449,6 +461,7 @@ public class DSUManager {
         if (slot < 0) {
             slot = findEmptySlot(container);
             if (slot < 0) {
+                if (debugMode) plugin.getLogger().info("[DSU STORE] no empty slot found");
                 return;
             }
             setStoredTemplate(container, slot, item.clone());
@@ -459,6 +472,7 @@ public class DSUManager {
         setStoredAmount(container, slot, current + canAdd);
         item.setAmount(amount - canAdd);
         rewriteContainerLore(container);
+        if (debugMode) plugin.getLogger().info("[DSU STORE] stored " + canAdd + " of " + item.getType() + ", remaining=" + item.getAmount());
     }
 
     /*
@@ -468,13 +482,15 @@ public class DSUManager {
         if (toAdd == null || inv == null || player == null || ItemList.isPluginItem(toAdd)) {
             return false;
         }
+        DeepStoragePlus plugin = DeepStoragePlus.getInstance();
+        boolean debugMode = plugin != null && plugin.getConfig().getBoolean("debug", false);
         for (int i = 0; i < 5; i++) {
             if (toAdd.getAmount() > 0) {
                 int containerSlot = 8 + (9 * i);
                 ItemStack container = inv.getItem(containerSlot);
+                if (debugMode) plugin.getLogger().info("[DSU ADD] slot=" + containerSlot + ", container=" + (container != null ? container.getType() : "null") + ", isGroup=" + ItemList.isGroup(container, ItemList.GROUP_STORAGE_CONTAINER));
                 if (container == null) continue;
                 addDataToContainer(container, toAdd);
-                // Write the modified container back into the inventory so PersistentData is not lost
                 inv.setItem(containerSlot, container);
             } else {
                 break;
@@ -497,7 +513,6 @@ public class DSUManager {
                 continue;
             }
             addDataToContainer(container, toAdd);
-            // Write the modified container back into the inventory so PersistentData is not lost
             inv.setItem(containerSlot, container);
             if (toAdd.getAmount() < 1) {
                 break;
@@ -606,7 +621,6 @@ public class DSUManager {
                     rewriteContainerLore(container);
                 }
             }
-            // Write the modified container back into the inventory so PersistentData is not lost
             inv.setItem(containerSlot, container);
         }
         return taken;
