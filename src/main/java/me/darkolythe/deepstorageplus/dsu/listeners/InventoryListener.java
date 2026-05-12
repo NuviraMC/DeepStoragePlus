@@ -35,7 +35,6 @@ public class InventoryListener implements Listener {
 
     private final DeepStoragePlus main;
     private final Map<UUID, Integer> ioSelectionSlot = new ConcurrentHashMap<>();
-    private static final String DEBUG_KEY = "debug";
 
     public InventoryListener(DeepStoragePlus plugin) {
         this.main = plugin;
@@ -124,7 +123,6 @@ public class InventoryListener implements Listener {
         String ioConfigTitle = ChatColor.BLUE + "" + ChatColor.BOLD + LanguageManager.getValue("dsuioconfig");
 
         if (event.getView().getTitle().equals(ioConfigTitle)) {
-            debug("IO config click: slot=" + event.getSlot() + ", click=" + event.getClick());
             event.setCancelled(true);
             if (event.getSlot() == 8 || event.getSlot() == 17) {
                 ioSelectionSlot.put(player.getUniqueId(), event.getSlot());
@@ -204,13 +202,6 @@ public class InventoryListener implements Listener {
         }
 
         if (event.getView().getTitle().equals(DeepStoragePlus.DSUname) || StorageUtils.isDSU(inv)) {
-            debug("DSU click: slot=" + event.getSlot()
-                    + ", click=" + event.getClick()
-                    + ", shift=" + event.isShiftClick()
-                    + ", topInv=" + (event.getClickedInventory() == inv)
-                    + ", item=" + (item != null ? item.getType() : "null")
-                    + ", cursor=" + (cursor != null ? cursor.getType() : "null"));
-
             if (event.getClickedInventory() != player.getInventory()) {
                 if (event.getSlot() % 9 == 8) {
                     if (event.getSlot() != 53) {
@@ -220,6 +211,8 @@ public class InventoryListener implements Listener {
                                 if (cursor.hasItemMeta() && ItemList.isGroup(cursor, ItemList.GROUP_STORAGE_CONTAINER)) {
                                     inv.setItem(event.getSlot(), cursor);
                                     player.setItemOnCursor(new ItemStack(Material.AIR));
+                                    // Persist container to block state so hoppers can detect it immediately
+                                    persistInvToBlock(inv);
                                     main.dsuupdatemanager.updateItemsExact(inv);
                                 }
                             } else {
@@ -232,6 +225,8 @@ public class InventoryListener implements Listener {
                             if (item != null && item.getType() != Material.WHITE_STAINED_GLASS_PANE) {
                                 player.setItemOnCursor(item.clone());
                                 inv.setItem(event.getSlot(), DSUManager.getEmptyBlock());
+                                // Persist container removal to block state
+                                persistInvToBlock(inv);
                                 main.dsuupdatemanager.updateItemsExact(inv);
                             }
                         }
@@ -410,6 +405,23 @@ public class InventoryListener implements Listener {
         }
     }
 
+    /**
+     * Persists the current in-memory inventory state to the underlying block state,
+     * so that the hopper's InventoryMoveItemEvent sees the correct container items
+     * without requiring the player to close and reopen the inventory.
+     */
+    private void persistInvToBlock(Inventory inv) {
+        if (inv.getLocation() == null) return;
+        org.bukkit.block.BlockState state = inv.getLocation().getBlock().getState();
+        if (state instanceof org.bukkit.block.Container container) {
+            org.bukkit.inventory.Inventory blockInv = container.getInventory();
+            for (int s = 0; s < inv.getSize(); s++) {
+                blockInv.setItem(s, inv.getItem(s));
+            }
+            state.update(true);
+        }
+    }
+
     private int findActiveSelectionSlot(Inventory inv) {
         ItemStack input = inv.getItem(8);
         if (input != null && !input.getEnchantments().isEmpty()) {
@@ -466,18 +478,5 @@ public class InventoryListener implements Listener {
                 }
             }
         }, 1L, 5L);
-    }
-
-    // NOTE: InventoryMoveItemEvent for DSU hoppers is handled exclusively
-    // by IOListener. No handler here to avoid conflicts.
-
-    private boolean isDebug() {
-        return main.getConfig().getBoolean(DEBUG_KEY, false);
-    }
-
-    private void debug(String message) {
-        if (isDebug()) {
-            main.getLogger().info("[DSU DEBUG] " + message);
-        }
     }
 }
