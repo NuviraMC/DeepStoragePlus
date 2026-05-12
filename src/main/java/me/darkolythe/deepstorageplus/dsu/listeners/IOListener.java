@@ -6,6 +6,7 @@ import me.darkolythe.deepstorageplus.dsu.managers.DSUManager;
 import me.darkolythe.deepstorageplus.utils.ItemList;
 import me.darkolythe.deepstorageplus.utils.LanguageManager;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
@@ -19,12 +20,25 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static me.darkolythe.deepstorageplus.dsu.StorageUtils.hasNoMeta;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpeedUpgrade;
 
 public class IOListener implements Listener {
 
     private final DeepStoragePlus main;
+
+    /**
+     * Per-hopper-location tick gate.
+     * Key   = location string of the hopper (source)
+     * Value = server tick at which we last processed a transfer
+     *
+     * This prevents the event from firing multiple times per tick for the
+     * same hopper and overcounting items.
+     */
+    private final Map<String, Long> lastInputTick = new HashMap<>();
 
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin;
@@ -88,33 +102,45 @@ public class IOListener implements Listener {
     // -----------------------------------------------------------------------
     // INPUT: hopper -> DSU
     //
-    // We always cancel vanilla (it would put items into display slots).
-    // Instead we:
-    //  1. Find the first non-empty, non-plugin slot in the hopper
-    //  2. Try to store 1x into DSU
-    //  3. Only remove from hopper if storage succeeded
+    // Always cancel vanilla. Use a per-location tick gate to ensure we process
+    // at most ONE transfer per server tick per hopper, regardless of how many
+    // times Bukkit fires the event for the same hopper in the same tick.
     // -----------------------------------------------------------------------
     private void handleInput(InventoryMoveItemEvent event, Inventory hopper, Inventory dsu) {
         event.setCancelled(true);
 
-        // Find the first valid hopper slot (same logic vanilla uses: slot 0 first)
+        // Tick gate: skip duplicate events for the same hopper in the same tick
+        Location hopperLoc = hopper.getLocation();
+        String key = hopperLoc != null ? locKey(hopperLoc) : null;
+        long currentTick = main.getServer().getCurrentTick();
+        if (key != null) {
+            Long last = lastInputTick.get(key);
+            if (last != null && last == currentTick) {
+                return; // already handled this hopper this tick
+            }
+            lastInputTick.put(key, currentTick);
+            // Prune old entries to avoid memory leak (keep map small)
+            if (lastInputTick.size() > 512) {
+                lastInputTick.entrySet().removeIf(e -> e.getValue() < currentTick - 40);
+            }
+        }
+
+        // Find the first valid hopper slot (same order as vanilla: slot 0 first)
         for (int i = 0; i < hopper.getSize(); i++) {
             ItemStack slot = hopper.getItem(i);
             if (slot == null || slot.getType() == Material.AIR) continue;
-            if (!hasNoMeta(slot)) continue; // skip plugin items
+            if (!hasNoMeta(slot)) continue;
 
-            // Try to store exactly 1 into DSU
+            // Build a clean 1-item stack to store
             ItemStack toStore = new ItemStack(slot.getType(), 1);
-            // Copy item meta if present (enchanted books etc.) but hopper items are plain
-            if (slot.hasItemMeta()) toStore.setItemMeta(slot.getItemMeta().clone());
 
-            int amountBefore = toStore.getAmount(); // always 1
+            int before = toStore.getAmount();
             DSUManager.addToDSUSilent(toStore, dsu);
-            int stored = amountBefore - toStore.getAmount(); // 1 if stored, 0 if not
+            int stored = before - toStore.getAmount();
 
-            if (stored <= 0) return; // DSU full or no matching container
+            if (stored <= 0) return; // no space in DSU
 
-            // Remove exactly 1 from this specific slot (by index, no isSimilar needed)
+            // Remove exactly 1 from this slot by index
             if (slot.getAmount() <= 1) {
                 hopper.setItem(i, null);
             } else {
@@ -123,7 +149,7 @@ public class IOListener implements Listener {
             }
 
             main.dsuupdatemanager.updateItemsExact(dsu);
-            return; // one item per hopper tick
+            return;
         }
     }
 
@@ -157,5 +183,9 @@ public class IOListener implements Listener {
             if (slot.isSimilar(item) && slot.getAmount() < slot.getMaxStackSize()) return true;
         }
         return false;
+    }
+
+    private static String locKey(Location loc) {
+        return loc.getWorld().getName() + "|" + loc.getBlockX() + "|" + loc.getBlockY() + "|" + loc.getBlockZ();
     }
 }
