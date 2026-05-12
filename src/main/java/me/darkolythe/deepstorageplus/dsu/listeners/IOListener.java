@@ -73,21 +73,16 @@ public class IOListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onHopperInput(InventoryMoveItemEvent event) {
         Inventory initial = event.getSource();
-        Inventory dest = event.getDestination();
+        Inventory dest   = event.getDestination();
 
-        if (initial.getSize() != 54 && dest.getSize() != 54) return;
-
-        ItemStack moveItem = event.getItem();
-
-        // Determine direction: DSU is source (output) or destination (input)
         boolean dsuIsSource = initial.getSize() == 54 && StorageUtils.isDSU(initial);
         boolean dsuIsDest   = dest.getSize()    == 54 && StorageUtils.isDSU(dest);
 
         if (!dsuIsSource && !dsuIsDest) {
-            // Check sorter
-            Inventory sorterInv = dsuIsSource ? initial : dest;
-            if (StorageUtils.isSorter(dest.getSize() == 54 ? dest : initial)) {
-                if (!dsuIsSource) {
+            // Sorter check
+            Inventory inv54 = initial.getSize() == 54 ? initial : (dest.getSize() == 54 ? dest : null);
+            if (inv54 != null && StorageUtils.isSorter(inv54)) {
+                if (dsuIsDest) {
                     main.sorterUpdateManager.sortItems(dest, DeepStoragePlus.minTimeSinceLastSortHopper);
                 } else {
                     event.setCancelled(true);
@@ -96,134 +91,128 @@ public class IOListener implements Listener {
             return;
         }
 
+        // Always cancel vanilla transfer — we handle everything ourselves
+        event.setCancelled(true);
+
         Inventory dsuInv = dsuIsSource ? initial : dest;
         ItemStack IOSettings = dsuInv.getItem(53);
 
         if (IOSettings == null || !ItemList.isItem(IOSettings, ItemList.KEY_IO_SETTINGS)) {
-            return; // no IO setup → allow vanilla hopper behaviour
+            return; // No IO item → do nothing (vanilla already cancelled)
         }
-        if (!hasNoMeta(moveItem)) {
-            return; // never move plugin items via hopper
+        if (!hasNoMeta(event.getItem())) {
+            return; // Never move plugin items via hopper
         }
-
-        // Always cancel the vanilla move — we handle it ourselves
-        event.setCancelled(true);
 
         int amt = getSpeedUpgrade(IOSettings) + 1;
 
         if (dsuIsDest) {
-            // Hopper → DSU (input)
-            ItemStack input = getInput(IOSettings);
-            scheduleHopperToDSU(initial, dest, input, amt);
+            // ---- Hopper → DSU (INPUT) — synchronous to avoid race conditions ----
+            ItemStack filter = getInput(IOSettings);
+            hopperToDSU(initial, dest, filter, amt);
         } else {
-            // DSU → Hopper (output)
+            // ---- DSU → Hopper (OUTPUT) — delayed by 1 tick (Bukkit requirement) ----
             ItemStack output = getOutput(IOSettings);
             if (output != null && output.getType() != Material.AIR) {
-                scheduleDSUToHopper(initial, dest, output, amt);
+                final ItemStack outputFinal = output;
+                Bukkit.getScheduler().scheduleSyncDelayedTask(main,
+                    () -> dsutoHopper(initial, dest, outputFinal, amt), 1L);
             }
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Hopper → DSU
-    // Moves exactly `amt` items from the first matching hopper slot into DSU.
-    // Writes the reduced amount back to the slot so nothing is lost.
-    // -----------------------------------------------------------------------
-    private void scheduleHopperToDSU(Inventory hopper, Inventory dsu, ItemStack filter, int amt) {
-        Bukkit.getScheduler().scheduleSyncDelayedTask(main, () -> {
-            for (int i = 0; i < hopper.getSize(); i++) {
-                ItemStack slot = hopper.getItem(i);
-                if (slot == null || slot.getType() == Material.AIR) continue;
-                if (filter != null && !filter.isSimilar(slot)) continue;
-                if (!hasNoMeta(slot)) continue;
+    // -------------------------------------------------------------------------
+    // Hopper → DSU  (synchronous — called directly in the event handler)
+    //
+    // Why synchronous?
+    // setCancelled(true) already stops the vanilla move. We can immediately
+    // read + write the hopper slot in the same tick with zero race conditions.
+    // Using a delayed task caused multiple parallel tasks to read the same
+    // slot amount and double/triple-consume items.
+    // -------------------------------------------------------------------------
+    private void hopperToDSU(Inventory hopper, Inventory dsu, ItemStack filter, int amt) {
+        for (int i = 0; i < hopper.getSize(); i++) {
+            ItemStack slot = hopper.getItem(i);
+            if (slot == null || slot.getType() == Material.AIR) continue;
+            if (filter != null && !filter.isSimilar(slot)) continue;
+            if (!hasNoMeta(slot)) continue;
 
-                int toMove = Math.min(amt, slot.getAmount());
+            int toMove = Math.min(amt, slot.getAmount());
 
-                // Clone exactly the amount we want to move
-                ItemStack moving = slot.clone();
-                moving.setAmount(toMove);
+            ItemStack moving = slot.clone();
+            moving.setAmount(toMove);
 
-                // addToDSUSilent drains moving.getAmount() down to what couldn't be stored
-                DSUManager.addToDSUSilent(moving, dsu);
-                int actuallyStored = toMove - moving.getAmount();
+            // addToDSUSilent reduces moving.getAmount() to what could NOT be stored
+            DSUManager.addToDSUSilent(moving, dsu);
+            int actuallyStored = toMove - moving.getAmount();
 
-                if (actuallyStored <= 0) return; // DSU full / no matching container
+            if (actuallyStored <= 0) return; // DSU full or no matching container
 
-                // Write the corrected remainder back to the hopper slot
-                int newAmt = slot.getAmount() - actuallyStored;
-                if (newAmt <= 0) {
-                    hopper.setItem(i, null);
-                } else {
-                    ItemStack remainder = slot.clone();
-                    remainder.setAmount(newAmt);
-                    hopper.setItem(i, remainder);
-                }
-
-                main.dsuupdatemanager.updateItemsExact(dsu);
-                return; // one slot per hopper tick — match vanilla behaviour
+            // Write the exact remainder back into the hopper slot atomically
+            int newAmt = slot.getAmount() - actuallyStored;
+            if (newAmt <= 0) {
+                hopper.setItem(i, null);
+            } else {
+                ItemStack remainder = slot.clone();
+                remainder.setAmount(newAmt);
+                hopper.setItem(i, remainder);
             }
-        }, 1L);
-    }
 
-    // -----------------------------------------------------------------------
-    // DSU → Hopper
-    // Pulls exactly `amt` items of type `output` from DSU into the hopper.
-    // Only removes from DSU what actually fit into the hopper.
-    // -----------------------------------------------------------------------
-    private void scheduleDSUToHopper(Inventory dsu, Inventory hopper, ItemStack output, int amt) {
-        Bukkit.getScheduler().scheduleSyncDelayedTask(main, () -> {
-            int available = DSUManager.getTotalItemAmount(dsu, output);
-            if (available <= 0) return;
-
-            int wantToMove = Math.min(amt, available);
-
-            ItemStack toGive = output.clone();
-            toGive.setAmount(wantToMove);
-
-            // addItem returns items that didn't fit
-            HashMap<Integer, ItemStack> overflow = hopper.addItem(toGive);
-            int overflowAmt = overflow.values().stream().mapToInt(ItemStack::getAmount).sum();
-            int actuallyMoved = wantToMove - overflowAmt;
-
-            if (actuallyMoved <= 0) return; // hopper full
-
-            DSUManager.takeItems(output, dsu, actuallyMoved);
             main.dsuupdatemanager.updateItemsExact(dsu);
-        }, 1L);
+            return; // One slot per hopper tick — vanilla behaviour
+        }
     }
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // DSU → Hopper (delayed by 1 tick — Bukkit requires inventory writes
+    // to the destination to happen outside the event handler)
+    // -------------------------------------------------------------------------
+    private void dsutoHopper(Inventory dsu, Inventory hopper, ItemStack output, int amt) {
+        int available = DSUManager.getTotalItemAmount(dsu, output);
+        if (available <= 0) return;
+
+        int wantToMove = Math.min(amt, available);
+        ItemStack toGive = output.clone();
+        toGive.setAmount(wantToMove);
+
+        HashMap<Integer, ItemStack> overflow = hopper.addItem(toGive);
+        int overflowAmt = overflow.values().stream().mapToInt(ItemStack::getAmount).sum();
+        int actuallyMoved = wantToMove - overflowAmt;
+
+        if (actuallyMoved <= 0) return; // hopper full
+
+        DSUManager.takeItems(output, dsu, actuallyMoved);
+        main.dsuupdatemanager.updateItemsExact(dsu);
+    }
+
+    // -------------------------------------------------------------------------
     // IO Settings helpers
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
     private static ItemStack getInput(ItemStack ioItem) {
         if (ioItem == null || !ioItem.hasItemMeta()) return null;
-        // Check PDC template first (set via in-game IO config GUI)
         ItemStack exact = DSUManager.getIoTemplate(ioItem, DSUManager.IO_INPUT_TEMPLATE_TAG);
         if (exact != null) return exact;
-        // Fall back to lore text
         List<String> lore = ioItem.getItemMeta().getLore();
         if (lore == null) return null;
         String line = findIOLine(lore, LanguageManager.getValue("input"), "input", "eingang");
         if (line == null) return null;
         String value = extractIOValue(line);
-        if (isAllValue(value)) return null; // "all" → accept everything (null filter)
+        if (isAllValue(value)) return null; // null = accept all
         Material mat = stringToMat(line, "");
         return mat == Material.AIR ? null : new ItemStack(mat);
     }
 
     private static ItemStack getOutput(ItemStack ioItem) {
         if (ioItem == null || !ioItem.hasItemMeta()) return null;
-        // Check PDC template first
         ItemStack exact = DSUManager.getIoTemplate(ioItem, DSUManager.IO_OUTPUT_TEMPLATE_TAG);
         if (exact != null) return exact;
-        // Fall back to lore text
         List<String> lore = ioItem.getItemMeta().getLore();
         if (lore == null || lore.size() < 2) return null;
         String line = findIOLine(lore, LanguageManager.getValue("output"), "output", "ausgang");
         if (line == null) return null;
         String value = extractIOValue(line);
-        if (isNoneValue(value)) return null; // "none" → output disabled
+        if (isNoneValue(value)) return null; // null = output disabled
         Material mat = stringToMat(line, "");
         return mat == Material.AIR ? null : new ItemStack(mat);
     }
@@ -250,14 +239,12 @@ public class IOListener implements Listener {
     }
 
     private static boolean isAllValue(String v) {
-        String n = normalizeToken(v);
-        String c = normalizeToken(LanguageManager.getValue("all"));
+        String n = normalizeToken(v), c = normalizeToken(LanguageManager.getValue("all"));
         return n.equals("all") || n.equals("alle") || (!c.isEmpty() && n.equals(c));
     }
 
     private static boolean isNoneValue(String v) {
-        String n = normalizeToken(v);
-        String c = normalizeToken(LanguageManager.getValue("none"));
+        String n = normalizeToken(v), c = normalizeToken(LanguageManager.getValue("none"));
         return n.equals("none") || n.equals("keine") || (!c.isEmpty() && n.equals(c));
     }
 
