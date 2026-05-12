@@ -20,6 +20,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -28,12 +29,13 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpee
 
 public class IOListener implements Listener {
 
-    // Slots that hold persistent DSU data (containers + IO item).
-    // Wall items (7,16,25,34,43,52) are GUI-only and NOT stored in the physical chest.
+    // Slots that hold persistent DSU data. Wall items (7,16,25,34,43,52) are
+    // GUI-only and are NOT physically stored in the chest when it is closed.
     private static final Set<Integer> PERSISTENT_DSU_SLOTS = Set.of(8, 17, 26, 35, 44, 53);
 
     private final DeepStoragePlus main;
     private final Logger log;
+    private final Set<String> pendingAbsorb = new HashSet<>();
 
     public IOListener(DeepStoragePlus plugin) {
         this.main = plugin;
@@ -88,57 +90,44 @@ public class IOListener implements Listener {
         }
 
         if (dsuIsDest) {
-            handleInput(event, source, dest);
+            handleInput(event, dest);
         } else {
             handleOutput(event, source, dest);
         }
     }
 
-    private void handleInput(InventoryMoveItemEvent event, Inventory hopper, Inventory dsu) {
-        // Cancel vanilla transfer — we handle it ourselves
-        event.setCancelled(true);
+    private void handleInput(InventoryMoveItemEvent event, Inventory dsu) {
+        // Do NOT cancel the event - cancelling stops the hopper cooldown reset
+        // and the hopper never fires again, losing all remaining items.
+        // Instead: let Vanilla put the item into the chest, then absorb it immediately.
 
-        // The event item is the 1 item Vanilla *would* transfer.
-        // Store it directly into the DSU.
-        ItemStack toStore = event.getItem().clone();
-        DSUManager.addToDSUSilent(toStore, dsu);
-        int stored = event.getItem().getAmount() - toStore.getAmount();
+        Location dsuLoc = dsu.getLocation();
+        if (dsuLoc == null) return;
+        String key = dsuLoc.getWorld().getName() + "|" + dsuLoc.getBlockX() + "|" + dsuLoc.getBlockY() + "|" + dsuLoc.getBlockZ();
 
-        log.info("[HOPPER-IN] item=" + event.getItem().getType()
-                + " amt=" + event.getItem().getAmount()
-                + " stored=" + stored);
+        // Schedule absorb for next tick (after Vanilla wrote item into chest)
+        // De-duplicate: only one absorb task per DSU per tick
+        if (pendingAbsorb.contains(key)) return;
+        pendingAbsorb.add(key);
 
-        if (stored <= 0) {
-            // DSU full / no container for this item type
-            return;
-        }
+        main.getServer().getScheduler().runTask(main, () -> {
+            pendingAbsorb.remove(key);
+            if (dsuLoc.getWorld() == null) return;
+            Block block = dsuLoc.getBlock();
+            if (!(block.getState() instanceof Chest chest)) return;
+            Inventory freshDsu = chest.getInventory();
+            if (!StorageUtils.isDSU(freshDsu)) return;
 
-        // Remove the transferred item from the source hopper
-        ItemStack[] hopperContents = hopper.getContents();
-        int remaining = stored;
-        for (int i = 0; i < hopperContents.length && remaining > 0; i++) {
-            ItemStack slot = hopperContents[i];
-            if (slot == null || slot.getType() == Material.AIR) continue;
-            if (!slot.isSimilar(event.getItem()) && slot.getType() != event.getItem().getType()) continue;
-
-            int take = Math.min(slot.getAmount(), remaining);
-            remaining -= take;
-            slot.setAmount(slot.getAmount() - take);
-            hopper.setItem(i, slot.getAmount() <= 0 ? null : slot);
-        }
-
-        // Synchronously clean up any stray items in non-DSU slots
-        // (Vanilla may have already written to the chest before we could cancel)
-        cleanStraySlots(dsu);
-
-        main.dsuupdatemanager.updateItemsExact(dsu);
+            absorb(freshDsu);
+        });
     }
 
     /**
-     * Scans every chest slot that is NOT a persistent DSU slot and rescues
-     * any items Vanilla may have written there before our cancel took effect.
+     * Absorbs all items from non-persistent DSU slots into DSU storage.
+     * These are items Vanilla placed into the chest via hopper transfer.
      */
-    private void cleanStraySlots(Inventory dsu) {
+    private void absorb(Inventory dsu) {
+        boolean anyStored = false;
         for (int i = 0; i < dsu.getSize(); i++) {
             if (PERSISTENT_DSU_SLOTS.contains(i)) continue;
             ItemStack slot = dsu.getItem(i);
@@ -148,12 +137,16 @@ public class IOListener implements Listener {
             ItemStack toStore = slot.clone();
             DSUManager.addToDSUSilent(toStore, dsu);
             int stored = slot.getAmount() - toStore.getAmount();
-            if (stored <= 0) continue;
 
-            log.info("[STRAY-CLEAN] slot=" + i + " type=" + slot.getType()
+            log.info("[DSU-ABSORB] slot=" + i + " type=" + slot.getType()
                     + " amt=" + slot.getAmount() + " stored=" + stored);
 
+            if (stored <= 0) continue;
+            anyStored = true;
             dsu.setItem(i, toStore.getAmount() <= 0 ? null : toStore);
+        }
+        if (anyStored) {
+            main.dsuupdatemanager.updateItemsExact(dsu);
         }
     }
 
@@ -181,9 +174,5 @@ public class IOListener implements Listener {
             if (slot.isSimilar(item) && slot.getAmount() < slot.getMaxStackSize()) return true;
         }
         return false;
-    }
-
-    private static String locKey(Location loc) {
-        return loc.getWorld().getName() + "|" + loc.getBlockX() + "|" + loc.getBlockY() + "|" + loc.getBlockZ();
     }
 }
