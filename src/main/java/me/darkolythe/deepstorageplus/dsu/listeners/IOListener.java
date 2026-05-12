@@ -10,6 +10,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -33,8 +34,6 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpee
 
 public class IOListener implements Listener {
 
-    // Slots that hold persistent DSU data. Wall items (7,16,25,34,43,52) are
-    // GUI-only and are NOT physically stored in the chest when it is closed.
     private static final Set<Integer> PERSISTENT_DSU_SLOTS = Set.of(8, 17, 26, 35, 44, 53);
 
     private final DeepStoragePlus main;
@@ -120,22 +119,10 @@ public class IOListener implements Listener {
         });
     }
 
-    /**
-     * Absorbs all stray items (placed by Vanilla hopper) from non-persistent
-     * DSU slots into the DSU container storage.
-     *
-     * Strategy:
-     *  1. Collect all stray slots and their items.
-     *  2. Clear those slots immediately so the inventory is clean.
-     *  3. Merge identical materials into one stack and call addToDSUSilent
-     *     once per material — prevents duplicate template entries.
-     *  4. Any remainder that didn't fit goes back into the cleared slots.
-     *  5. updateItemsExact runs once at the end so the display is always fresh.
-     */
     private void absorb(Inventory dsu) {
-        // Step 1: collect stray slots
+        // Step 1: collect stray slots and merge by material
         List<Integer> straySlots = new ArrayList<>();
-        Map<String, ItemStack> merged = new HashMap<>(); // materialName -> merged stack
+        Map<String, ItemStack> merged = new HashMap<>();
 
         for (int i = 0; i < dsu.getSize(); i++) {
             if (PERSISTENT_DSU_SLOTS.contains(i)) continue;
@@ -154,13 +141,12 @@ public class IOListener implements Listener {
 
         if (straySlots.isEmpty()) return;
 
-        // Step 2: clear the stray slots before storing so addToDSUSilent
-        // cannot accidentally write into them (they are non-persistent slots).
+        // Step 2: clear stray slots before storing
         for (int i : straySlots) {
             dsu.setItem(i, null);
         }
 
-        // Step 3: store merged stacks — one addToDSUSilent call per material
+        // Step 3: store merged stacks — one call per material
         boolean anyStored = false;
         for (ItemStack toStore : merged.values()) {
             int before = toStore.getAmount();
@@ -170,11 +156,10 @@ public class IOListener implements Listener {
             if (stored > 0) anyStored = true;
         }
 
-        // Step 4: put remainders (DSU full) back into the slots we cleared
+        // Step 4: put remainders back into cleared slots
         int remainderSlot = 0;
         for (ItemStack remainder : merged.values()) {
             if (remainder.getAmount() <= 0) continue;
-            // Find a free slot from the ones we cleared
             while (remainderSlot < straySlots.size()) {
                 int physSlot = straySlots.get(remainderSlot++);
                 if (dsu.getItem(physSlot) == null) {
@@ -184,9 +169,17 @@ public class IOListener implements Listener {
             }
         }
 
-        // Step 5: refresh display
-        if (anyStored) {
-            main.dsuupdatemanager.updateItemsExact(dsu);
+        if (!anyStored) return;
+
+        // Step 5: update container lore
+        main.dsuupdatemanager.updateItemsExact(dsu);
+
+        // Step 6: force-refresh all players currently viewing this DSU
+        // so the updated item counts are visible without requiring a click.
+        for (HumanEntity viewer : new ArrayList<>(dsu.getViewers())) {
+            if (viewer instanceof Player p) {
+                p.updateInventory();
+            }
         }
     }
 
@@ -204,6 +197,10 @@ public class IOListener implements Listener {
 
             hopper.addItem(give);
             main.dsuupdatemanager.updateItemsExact(dsu);
+            // Refresh viewers on output too
+            for (HumanEntity viewer : new ArrayList<>(dsu.getViewers())) {
+                if (viewer instanceof Player p) p.updateInventory();
+            }
             return;
         }
     }
