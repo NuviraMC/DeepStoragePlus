@@ -20,6 +20,7 @@ import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -134,7 +135,6 @@ public class IOListener implements Listener {
      * slot to be allocated on every single tick.
      */
     private void absorb(Inventory dsu, Block block) {
-        // Step 1: collect stray slots and merge by type+meta
         List<Integer> straySlots = new ArrayList<>();
         Map<String, ItemStack> merged = new HashMap<>();
 
@@ -145,24 +145,19 @@ public class IOListener implements Listener {
             if (ItemList.isPluginItem(slot)) continue;
 
             straySlots.add(i);
-            // Include meta in the merge key so differently-meta'd items stay separate
-            String key = slot.getType().name() + ":" + (slot.hasItemMeta() ? slot.getItemMeta().hashCode() : 0);
+            // Statt hashCode: normalize-basierter Key — nur relevante Felder
+            String key = buildMergeKey(slot);
             if (merged.containsKey(key)) {
                 merged.get(key).setAmount(merged.get(key).getAmount() + slot.getAmount());
             } else {
-                // clone() preserves meta — this is the core fix
                 merged.put(key, slot.clone());
             }
         }
 
         if (straySlots.isEmpty()) return;
 
-        // Step 2: clear stray slots before storing
-        for (int i : straySlots) {
-            dsu.setItem(i, null);
-        }
+        for (int i : straySlots) dsu.setItem(i, null);
 
-        // Step 3: store merged stacks
         boolean anyStored = false;
         for (ItemStack toStore : merged.values()) {
             int before = toStore.getAmount();
@@ -172,7 +167,6 @@ public class IOListener implements Listener {
             if (stored > 0) anyStored = true;
         }
 
-        // Step 4: put remainders back if container is full
         int remainderSlot = 0;
         for (ItemStack remainder : merged.values()) {
             if (remainder.getAmount() <= 0) continue;
@@ -187,18 +181,29 @@ public class IOListener implements Listener {
 
         if (!anyStored) return;
 
-        // Step 5: update display lore
         main.dsuupdatemanager.updateItemsExact(dsu);
-
-        // Step 6: flush block state so next hopper tick reads correct PDC
         if (block != null && block.getState() instanceof Chest chest) {
             chest.update(true, false);
         }
-
-        // Step 7: refresh all open viewers
         for (HumanEntity viewer : new ArrayList<>(dsu.getViewers())) {
             if (viewer instanceof Player p) p.updateInventory();
         }
+    }
+
+    /**
+     * Stabiler Merge-Key: nur Material + wirklich relevante Meta-Felder.
+     * Kein hashCode() — der ist bei Bukkit ItemMeta nicht stabil.
+     */
+    private static String buildMergeKey(ItemStack item) {
+        StringBuilder sb = new StringBuilder(item.getType().name());
+        if (!item.hasItemMeta()) return sb.toString();
+        ItemMeta meta = item.getItemMeta();
+        if (meta.hasDisplayName()) sb.append("|name:").append(meta.getDisplayName());
+        if (meta.hasLore())        sb.append("|lore:").append(meta.getLore());
+        if (meta.hasEnchants())    sb.append("|ench:").append(meta.getEnchants());
+        if (meta.hasCustomModelData()) sb.append("|cmd:").append(meta.getCustomModelData());
+        if (meta.isUnbreakable())  sb.append("|unbreak");
+        return sb.toString();
     }
 
     private void handleOutput(InventoryMoveItemEvent event, Inventory dsu, Inventory hopper) {
