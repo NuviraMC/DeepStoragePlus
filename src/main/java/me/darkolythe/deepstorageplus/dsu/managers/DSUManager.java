@@ -219,23 +219,34 @@ public class DSUManager {
     }
 
     private static ItemStack normalize(ItemStack item) {
-        if (item == null) {
-            return null;
-        }
+        if (item == null) return null;
         ItemStack clone = item.clone();
         clone.setAmount(1);
 
-        // Bukkit injiziert nach dem ersten Inventory-Move intern eine leere
-        // ItemMeta-Instanz. isSimilar() gibt dann false zurück gegen ein
-        // Template das ohne Meta gespeichert wurde. Strip: wenn kein
-        // sichtbarer/relevanter Meta-Inhalt vorhanden ist, Meta komplett entfernen.
         ItemMeta meta = clone.getItemMeta();
-        if (meta != null
-                && !meta.hasDisplayName()
-                && !meta.hasLore()
-                && !meta.hasEnchants()
-                && !meta.hasCustomModelData()
-                && meta.getPersistentDataContainer().isEmpty()) {
+        if (meta == null) return clone;
+
+        // Prüfe ob Meta wirklich sichtbaren/relevanten Inhalt hat
+        boolean hasRelevantMeta =
+                meta.hasDisplayName()
+                        || meta.hasLore()
+                        || meta.hasEnchants()
+                        || meta.hasCustomModelData()
+                        || meta.isUnbreakable()
+                        || !meta.getItemFlags().isEmpty();
+
+        // PDC: nur eigene (nicht-Bukkit-interne) Keys zählen
+        boolean hasRelevantPdc = false;
+        for (NamespacedKey key : meta.getPersistentDataContainer().getKeys()) {
+            // Paper/Bukkit-interne Keys ignorieren (Namespace "minecraft" oder "bukkit")
+            String ns = key.getNamespace();
+            if (!ns.equals("minecraft") && !ns.equals("bukkit")) {
+                hasRelevantPdc = true;
+                break;
+            }
+        }
+
+        if (!hasRelevantMeta && !hasRelevantPdc) {
             clone.setItemMeta(null);
         }
 
