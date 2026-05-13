@@ -326,6 +326,42 @@ public class DSUManager {
         return 0;
     }
 
+    private static boolean itemsMatch(ItemStack stored, ItemStack incoming) {
+        if (stored == null || incoming == null) return false;
+        if (stored.getType() != incoming.getType()) return false;
+
+        // Beide ohne sichtbare Meta → match
+        ItemMeta sm = stored.getItemMeta();
+        ItemMeta im = incoming.getItemMeta();
+
+        boolean storedHasReal = hasRelevantMeta(sm);
+        boolean incomingHasReal = hasRelevantMeta(im);
+
+        if (!storedHasReal && !incomingHasReal) return true;
+        if (storedHasReal != incomingHasReal) return false;
+
+        // Beide haben echte Meta → nur relevante Felder vergleichen
+        assert sm != null;
+        assert im != null;
+        if (!Objects.equals(sm.hasDisplayName() ? sm.getDisplayName() : null,
+                im.hasDisplayName() ? im.getDisplayName() : null)) return false;
+        if (!Objects.equals(sm.hasLore() ? sm.getLore() : null,
+                im.hasLore() ? im.getLore() : null)) return false;
+        if (!sm.getEnchants().equals(im.getEnchants())) return false;
+        if (sm.hasCustomModelData() != im.hasCustomModelData()) return false;
+        if (sm.hasCustomModelData() && sm.getCustomModelData() != im.getCustomModelData()) return false;
+        return true;
+    }
+
+    private static boolean hasRelevantMeta(ItemMeta meta) {
+        if (meta == null) return false;
+        return meta.hasDisplayName()
+                || meta.hasLore()
+                || meta.hasEnchants()
+                || meta.hasCustomModelData()
+                || meta.isUnbreakable();
+    }
+
     private static int findMatchingSlot(ItemStack container, ItemStack item) {
         ItemMeta meta = container != null ? container.getItemMeta() : null;
         List<String> lore = meta != null ? meta.getLore() : null;
@@ -341,7 +377,7 @@ public class DSUManager {
         for (int i = 0; i < slots; i++) {
             ItemStack template = getStoredTemplate(container, i);
             int amt = getStoredAmount(container, i);
-            boolean similar = template != null && template.isSimilar(normalized);
+            boolean similar = itemsMatch(template, normalized);
             DeepStoragePlus.getInstance().getLogger().info(
                     "[DSU MATCH DEBUG]   slot=" + i
                             + " template=" + (template == null ? "null" : template.getType())
@@ -520,26 +556,21 @@ public class DSUManager {
     }
 
     public static boolean addToDSU(ItemStack toAdd, Inventory inv, Player player) {
-        if (toAdd == null || inv == null || player == null) {
-            debug("addToDSU: null argument");
-            return false;
-        }
-        if (ItemList.isPluginItem(toAdd)) {
-            debug("addToDSU: " + toAdd.getType() + " is a plugin item, refusing");
-            return false;
-        }
-        debug("addToDSU: adding " + toAdd.getType() + " x" + toAdd.getAmount() + " to DSU invSize=" + inv.getSize());
+        if (toAdd == null || inv == null || player == null) return false;
+        if (ItemList.isPluginItem(toAdd)) return false;
+
         for (int i = 0; i < 5; i++) {
             if (toAdd.getAmount() <= 0) break;
             int containerSlot = 8 + (9 * i);
             ItemStack container = inv.getItem(containerSlot);
-            boolean isCont = isStorageContainer(container);
-            debug("addToDSU: slot=" + containerSlot + " type=" + (container != null ? container.getType() : "null") + " isContainer=" + isCont);
-            if (!isCont) continue;
-            addDataToContainer(container, toAdd);
-            inv.setItem(containerSlot, container);
+            if (!isStorageContainer(container)) continue;
+
+            // Klonen damit wir auf einer eigenen Kopie arbeiten
+            ItemStack containerCopy = container.clone();
+            addDataToContainer(containerCopy, toAdd);
+            // SOFORT zurückschreiben — nicht am Ende der Schleife
+            inv.setItem(containerSlot, containerCopy);
         }
-        debug("addToDSU: done, remaining=" + toAdd.getAmount());
         return toAdd.getAmount() <= 0;
     }
 
