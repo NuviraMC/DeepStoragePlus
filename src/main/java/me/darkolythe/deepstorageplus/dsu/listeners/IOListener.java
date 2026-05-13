@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
-import static me.darkolythe.deepstorageplus.dsu.StorageUtils.hasNoMeta;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.addSpeedUpgrade;
 
 public class IOListener implements Listener {
@@ -87,7 +86,11 @@ public class IOListener implements Listener {
 
         if (!dsuIsSource && !dsuIsDest) return;
 
-        if (!hasNoMeta(event.getItem())) {
+        // Block custom plugin items (named/enchanted) but do NOT use hasNoMeta
+        // here — Bukkit silently attaches internal meta to plain vanilla items
+        // after the first tick, which would cause hasNoMeta to block all
+        // subsequent hopper ticks for the same item type.
+        if (ItemList.isPluginItem(event.getItem())) {
             event.setCancelled(true);
             return;
         }
@@ -120,15 +123,18 @@ public class IOListener implements Listener {
     }
 
     /**
-     * Absorbs all stray items (placed by Vanilla hopper) from non-persistent
+     * Absorbs all stray items (placed by vanilla hopper) from non-persistent
      * DSU slots into the DSU container storage.
      *
-     * After storing, the block state is explicitly saved via update(true, false)
-     * so the next hopper tick reads the correct PDC data from disk/memory
-     * rather than a stale cached snapshot.
+     * Critical fix: use slot.clone() instead of new ItemStack(slot.getType(), 1)
+     * so the stored template carries the same meta as items Bukkit places on
+     * subsequent ticks. Without this, isSimilar() always returns false after
+     * the first tick because the first template has no meta while every later
+     * hopper item has Bukkit-internal meta attached — causing a new container
+     * slot to be allocated on every single tick.
      */
     private void absorb(Inventory dsu, Block block) {
-        // Step 1: collect stray slots and merge by material
+        // Step 1: collect stray slots and merge by type+meta
         List<Integer> straySlots = new ArrayList<>();
         Map<String, ItemStack> merged = new HashMap<>();
 
@@ -136,26 +142,27 @@ public class IOListener implements Listener {
             if (PERSISTENT_DSU_SLOTS.contains(i)) continue;
             ItemStack slot = dsu.getItem(i);
             if (slot == null || slot.getType() == Material.AIR) continue;
-            if (!hasNoMeta(slot)) continue;
+            if (ItemList.isPluginItem(slot)) continue;
 
             straySlots.add(i);
-            String key = slot.getType().name();
+            // Include meta in the merge key so differently-meta'd items stay separate
+            String key = slot.getType().name() + ":" + (slot.hasItemMeta() ? slot.getItemMeta().hashCode() : 0);
             if (merged.containsKey(key)) {
                 merged.get(key).setAmount(merged.get(key).getAmount() + slot.getAmount());
             } else {
+                // clone() preserves meta — this is the core fix
                 merged.put(key, slot.clone());
             }
         }
 
         if (straySlots.isEmpty()) return;
 
-        // Step 2: clear the stray slots before storing so addToDSUSilent
-        // cannot write remainder back into non-persistent slots accidentally.
+        // Step 2: clear stray slots before storing
         for (int i : straySlots) {
             dsu.setItem(i, null);
         }
 
-        // Step 3: store merged stacks — one addToDSUSilent call per material
+        // Step 3: store merged stacks
         boolean anyStored = false;
         for (ItemStack toStore : merged.values()) {
             int before = toStore.getAmount();
@@ -165,7 +172,7 @@ public class IOListener implements Listener {
             if (stored > 0) anyStored = true;
         }
 
-        // Step 4: put remainders (DSU containers full) back into cleared slots
+        // Step 4: put remainders back if container is full
         int remainderSlot = 0;
         for (ItemStack remainder : merged.values()) {
             if (remainder.getAmount() <= 0) continue;
@@ -180,17 +187,15 @@ public class IOListener implements Listener {
 
         if (!anyStored) return;
 
-        // Step 5: update container lore display
+        // Step 5: update display lore
         main.dsuupdatemanager.updateItemsExact(dsu);
 
-        // Step 6: flush the block state to disk so subsequent hopper ticks
-        // (which re-read the chest via block.getState()) see the updated PDC
-        // data rather than a stale cached version that triggers duplicate entries.
+        // Step 6: flush block state so next hopper tick reads correct PDC
         if (block != null && block.getState() instanceof Chest chest) {
             chest.update(true, false);
         }
 
-        // Step 7: force-refresh all players currently viewing this DSU
+        // Step 7: refresh all open viewers
         for (HumanEntity viewer : new ArrayList<>(dsu.getViewers())) {
             if (viewer instanceof Player p) p.updateInventory();
         }
