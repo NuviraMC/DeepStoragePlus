@@ -303,9 +303,24 @@ public class DSUManager {
         List<String> lore = meta != null ? meta.getLore() : null;
         int slots = getTypeSlotCount(lore);
         ItemStack normalized = normalize(item);
+
+        DeepStoragePlus.getInstance().getLogger().info(
+                "[DSU MATCH DEBUG] findMatchingSlot: slots=" + slots
+                        + " item=" + normalized.getType()
+                        + " hasMeta=" + normalized.hasItemMeta()
+                        + " loreSize=" + (lore == null ? "null" : lore.size()));
+
         for (int i = 0; i < slots; i++) {
             ItemStack template = getStoredTemplate(container, i);
-            if (template != null && template.isSimilar(normalized)) return i;
+            int amt = getStoredAmount(container, i);
+            boolean similar = template != null && template.isSimilar(normalized);
+            DeepStoragePlus.getInstance().getLogger().info(
+                    "[DSU MATCH DEBUG]   slot=" + i
+                            + " template=" + (template == null ? "null" : template.getType())
+                            + " templateHasMeta=" + (template != null && template.hasItemMeta())
+                            + " storedAmt=" + amt
+                            + " isSimilar=" + similar);
+            if (similar) return i;
         }
         return -1;
     }
@@ -314,8 +329,21 @@ public class DSUManager {
         ItemMeta meta = container.getItemMeta();
         List<String> lore = meta != null ? meta.getLore() : null;
         int slots = getTypeSlotCount(lore);
+
+        DeepStoragePlus.getInstance().getLogger().info(
+                "[DSU EMPTY DEBUG] findEmptySlot: slots=" + slots
+                        + " loreSize=" + (lore == null ? "null" : lore.size()));
+
         for (int i = 0; i < slots; i++) {
-            if (getStoredTemplate(container, i) == null || getStoredAmount(container, i) <= 0) return i;
+            ItemStack template = getStoredTemplate(container, i);
+            int amt = getStoredAmount(container, i);
+            boolean isEmpty = template == null || amt <= 0;
+            DeepStoragePlus.getInstance().getLogger().info(
+                    "[DSU EMPTY DEBUG]   slot=" + i
+                            + " template=" + (template == null ? "null" : template.getType())
+                            + " amt=" + amt
+                            + " isEmpty=" + isEmpty);
+            if (isEmpty) return i;
         }
         return -1;
     }
