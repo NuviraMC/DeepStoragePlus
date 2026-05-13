@@ -115,11 +115,19 @@ public class IOListener implements Listener {
             Inventory freshDsu = chest.getInventory();
             if (!StorageUtils.isDSU(freshDsu)) return;
 
-            absorb(freshDsu);
+            absorb(freshDsu, block);
         });
     }
 
-    private void absorb(Inventory dsu) {
+    /**
+     * Absorbs all stray items (placed by Vanilla hopper) from non-persistent
+     * DSU slots into the DSU container storage.
+     *
+     * After storing, the block state is explicitly saved via update(true, false)
+     * so the next hopper tick reads the correct PDC data from disk/memory
+     * rather than a stale cached snapshot.
+     */
+    private void absorb(Inventory dsu, Block block) {
         // Step 1: collect stray slots and merge by material
         List<Integer> straySlots = new ArrayList<>();
         Map<String, ItemStack> merged = new HashMap<>();
@@ -141,12 +149,13 @@ public class IOListener implements Listener {
 
         if (straySlots.isEmpty()) return;
 
-        // Step 2: clear stray slots before storing
+        // Step 2: clear the stray slots before storing so addToDSUSilent
+        // cannot write remainder back into non-persistent slots accidentally.
         for (int i : straySlots) {
             dsu.setItem(i, null);
         }
 
-        // Step 3: store merged stacks — one call per material
+        // Step 3: store merged stacks — one addToDSUSilent call per material
         boolean anyStored = false;
         for (ItemStack toStore : merged.values()) {
             int before = toStore.getAmount();
@@ -156,7 +165,7 @@ public class IOListener implements Listener {
             if (stored > 0) anyStored = true;
         }
 
-        // Step 4: put remainders back into cleared slots
+        // Step 4: put remainders (DSU containers full) back into cleared slots
         int remainderSlot = 0;
         for (ItemStack remainder : merged.values()) {
             if (remainder.getAmount() <= 0) continue;
@@ -171,15 +180,19 @@ public class IOListener implements Listener {
 
         if (!anyStored) return;
 
-        // Step 5: update container lore
+        // Step 5: update container lore display
         main.dsuupdatemanager.updateItemsExact(dsu);
 
-        // Step 6: force-refresh all players currently viewing this DSU
-        // so the updated item counts are visible without requiring a click.
+        // Step 6: flush the block state to disk so subsequent hopper ticks
+        // (which re-read the chest via block.getState()) see the updated PDC
+        // data rather than a stale cached version that triggers duplicate entries.
+        if (block != null && block.getState() instanceof Chest chest) {
+            chest.update(true, false);
+        }
+
+        // Step 7: force-refresh all players currently viewing this DSU
         for (HumanEntity viewer : new ArrayList<>(dsu.getViewers())) {
-            if (viewer instanceof Player p) {
-                p.updateInventory();
-            }
+            if (viewer instanceof Player p) p.updateInventory();
         }
     }
 
@@ -197,7 +210,6 @@ public class IOListener implements Listener {
 
             hopper.addItem(give);
             main.dsuupdatemanager.updateItemsExact(dsu);
-            // Refresh viewers on output too
             for (HumanEntity viewer : new ArrayList<>(dsu.getViewers())) {
                 if (viewer instanceof Player p) p.updateInventory();
             }
