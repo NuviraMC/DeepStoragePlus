@@ -23,7 +23,10 @@ import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.getLock
 
 public class StorageBreakListener implements Listener {
 
-    /** DSU storage-container slots (column 8, rows 0-4). */
+    /**
+     * DSU storage-container slots inside the full 54-slot double-chest inventory.
+     * Column 8, rows 0-4. Contents are PDC data on the container ItemStack.
+     */
     private static final Set<Integer> CONTAINER_SLOTS = Set.of(8, 17, 26, 35, 44);
 
     DeepStoragePlus main;
@@ -72,39 +75,48 @@ public class StorageBreakListener implements Listener {
 
     private void removeItems(Container chest) {
         chest.setCustomName(null);
-        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> emptyChest(chest), 1);
+        // Snapshot NOW before breakStorage() removes the block.
+        // The delayed task may run after the block is gone, making
+        // chest.getInventory().getItem(slot) throw ArrayIndexOutOfBounds
+        // because the backing array is only 27 slots (single chest) or gone.
+        ItemStack[] snapshot = chest.getInventory().getContents().clone();
+        Bukkit.getServer().getScheduler().scheduleSyncDelayedTask(main, () -> emptyChest(chest, snapshot), 1);
         breakStorage(chest);
     }
 
     /**
-     * Empties a DSU chest on break.
+     * Empties a DSU chest using a pre-captured contents snapshot.
      *
-     * Container slots (8, 17, 26, 35, 44) hold DSU storage container ItemStacks
-     * whose ACTUAL contents are stored as PDC data on the item — NOT as separate
-     * inventory items. We must drain them via DSUManager and drop the real stored
-     * items, then drop the physical container block itself.
+     * Root cause of the ArrayIndexOutOfBoundsException (Index 35 out of bounds
+     * for length 27): after the block is set to AIR the underlying container
+     * is only a 27-slot single chest. Slots 26-44 no longer exist.
+     * By snapshotting getContents() BEFORE breakStorage() we avoid this entirely.
      *
-     * All other plugin-internal items (walls, IO-settings, empty-block
-     * placeholders) are silently removed. Accidental user items are dropped.
+     * Additionally we guard containerSlot >= contents.length so the code is
+     * safe even if called on a half-chest for any reason.
+     *
+     * Container slots store item data as PDC on the container ItemStack.
+     * We drain them via a 54-slot synthetic inventory + DSUManager.takeItems()
+     * and drop the real stored items. The container block itself is also dropped.
      */
-    private void emptyChest(Container chest) {
-        Inventory inv = chest.getInventory();
-
+    private void emptyChest(Container chest, ItemStack[] contents) {
         for (int containerSlot : CONTAINER_SLOTS) {
-            ItemStack containerItem = inv.getItem(containerSlot);
+            if (containerSlot >= contents.length) continue; // half-chest guard
+
+            ItemStack containerItem = contents[containerSlot];
             if (containerItem == null || containerItem.getType() == Material.AIR) continue;
             if (!DSUManager.isStorageContainer(containerItem)) continue;
 
-            // Build a minimal snapshot inventory so takeItems can address slot 8
-            Inventory snapshot = Bukkit.createInventory(null, 54);
-            snapshot.setItem(8, containerItem.clone());
+            // 54-slot synthetic inventory so takeItems can address slot 8
+            Inventory snap = Bukkit.createInventory(null, 54);
+            snap.setItem(8, containerItem.clone());
 
-            for (ItemStack template : DSUManager.getTotalTemplates(snapshot)) {
+            for (ItemStack template : DSUManager.getTotalTemplates(snap)) {
                 if (template == null || template.getType() == Material.AIR) continue;
-                int remaining = DSUManager.getTotalItemAmount(snapshot, template);
+                int remaining = DSUManager.getTotalItemAmount(snap, template);
                 while (remaining > 0) {
                     int batch = Math.min(remaining, template.getMaxStackSize());
-                    int taken = DSUManager.takeItems(template, snapshot, batch);
+                    int taken = DSUManager.takeItems(template, snap, batch);
                     if (taken <= 0) break;
                     ItemStack drop = template.clone();
                     drop.setAmount(taken);
@@ -113,21 +125,15 @@ public class StorageBreakListener implements Listener {
                 }
             }
 
-            // Drop the physical storage container block
             chest.getWorld().dropItemNaturally(chest.getLocation(), containerItem.clone());
-            inv.setItem(containerSlot, null);
         }
 
-        // Clean up remaining slots
-        for (int i = 0; i < inv.getSize(); i++) {
+        for (int i = 0; i < contents.length; i++) {
             if (CONTAINER_SLOTS.contains(i)) continue;
-            ItemStack item = inv.getItem(i);
+            ItemStack item = contents[i];
             if (item == null || item.getType() == Material.AIR) continue;
-            if (ItemList.isPluginItem(item)) {
-                inv.setItem(i, null);
-            } else {
+            if (!ItemList.isPluginItem(item)) {
                 chest.getWorld().dropItemNaturally(chest.getLocation(), item);
-                inv.setItem(i, null);
             }
         }
     }
