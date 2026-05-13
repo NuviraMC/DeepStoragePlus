@@ -494,7 +494,10 @@ public class DSUManager {
                 debug("addDataToContainer: no empty slot");
                 return;
             }
-            setStoredTemplate(container, slot, item.clone());
+            // normalize() statt item.clone() — entfernt Bukkit-interne Meta
+            // die nach dem ersten Tick automatisch angehangen wird, damit
+            // isSimilar() auf allen folgenden Ticks true zurückgibt.
+            setStoredTemplate(container, slot, normalize(item));
             setStoredAmount(container, slot, 0);
         }
 
