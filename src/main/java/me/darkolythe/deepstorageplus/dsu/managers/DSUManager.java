@@ -219,9 +219,26 @@ public class DSUManager {
     }
 
     private static ItemStack normalize(ItemStack item) {
-        if (item == null) return null;
+        if (item == null) {
+            return null;
+        }
         ItemStack clone = item.clone();
         clone.setAmount(1);
+
+        // Bukkit injiziert nach dem ersten Inventory-Move intern eine leere
+        // ItemMeta-Instanz. isSimilar() gibt dann false zurück gegen ein
+        // Template das ohne Meta gespeichert wurde. Strip: wenn kein
+        // sichtbarer/relevanter Meta-Inhalt vorhanden ist, Meta komplett entfernen.
+        ItemMeta meta = clone.getItemMeta();
+        if (meta != null
+                && !meta.hasDisplayName()
+                && !meta.hasLore()
+                && !meta.hasEnchants()
+                && !meta.hasCustomModelData()
+                && meta.getPersistentDataContainer().isEmpty()) {
+            clone.setItemMeta(null);
+        }
+
         return clone;
     }
 
