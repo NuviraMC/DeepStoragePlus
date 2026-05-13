@@ -60,24 +60,23 @@ public class InventoryListener implements Listener {
         return display;
     }
 
+    /**
+     * Builds a pure lookup template from a DSU display item.
+     *
+     * Display items carry injected lore ("Item Count:", container storage lines)
+     * added by DSUUpdateManager. isSimilar() compares lore, so passing a
+     * decorated display item to DSUManager.takeItems() causes the similarity
+     * check to fail: stored templates were serialized via normalize() and have
+     * NO injected lore. Stripping all lore here makes isSimilar() match on
+     * every take, not just the first one.
+     */
     private static ItemStack buildTakeTemplate(ItemStack displayItem) {
-        if (displayItem == null || displayItem.getType() == Material.AIR) {
-            return null;
-        }
+        if (displayItem == null || displayItem.getType() == Material.AIR) return null;
         ItemStack template = displayItem.clone();
         ItemMeta meta = template.getItemMeta();
-        if (meta != null && meta.hasLore()) {
-            List<String> lore = meta.getLore();
-            if (lore != null) {
-                List<String> newLore = new ArrayList<>(lore);
-                newLore.removeIf(line -> ChatColor.stripColor(line).startsWith("Item Count:"));
-                if (newLore.isEmpty()) {
-                    meta.setLore(null);
-                } else {
-                    meta.setLore(newLore);
-                }
-                template.setItemMeta(meta);
-            }
+        if (meta != null) {
+            meta.setLore(null);
+            template.setItemMeta(meta);
         }
         template.setAmount(1);
         return template;
@@ -211,7 +210,6 @@ public class InventoryListener implements Listener {
                                 if (cursor.hasItemMeta() && ItemList.isGroup(cursor, ItemList.GROUP_STORAGE_CONTAINER)) {
                                     inv.setItem(event.getSlot(), cursor);
                                     player.setItemOnCursor(new ItemStack(Material.AIR));
-                                    // Persist container to block state so hoppers can detect it immediately
                                     persistInvToBlock(inv);
                                     main.dsuupdatemanager.updateItemsExact(inv);
                                 }
@@ -225,7 +223,6 @@ public class InventoryListener implements Listener {
                             if (item != null && item.getType() != Material.WHITE_STAINED_GLASS_PANE) {
                                 player.setItemOnCursor(item.clone());
                                 inv.setItem(event.getSlot(), DSUManager.getEmptyBlock());
-                                // Persist container removal to block state
                                 persistInvToBlock(inv);
                                 main.dsuupdatemanager.updateItemsExact(inv);
                             }
@@ -405,11 +402,6 @@ public class InventoryListener implements Listener {
         }
     }
 
-    /**
-     * Persists the current in-memory inventory state to the underlying block state,
-     * so that the hopper's InventoryMoveItemEvent sees the correct container items
-     * without requiring the player to close and reopen the inventory.
-     */
     private void persistInvToBlock(Inventory inv) {
         if (inv.getLocation() == null) return;
         org.bukkit.block.BlockState state = inv.getLocation().getBlock().getState();

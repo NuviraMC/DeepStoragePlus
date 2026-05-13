@@ -1,7 +1,6 @@
 package me.darkolythe.deepstorageplus.dsu.listeners;
 
 import me.darkolythe.deepstorageplus.DeepStoragePlus;
-import me.darkolythe.deepstorageplus.dsu.StorageUtils;
 import me.darkolythe.deepstorageplus.dsu.managers.DSUManager;
 import me.darkolythe.deepstorageplus.dsu.managers.SorterManager;
 import me.darkolythe.deepstorageplus.utils.ItemList;
@@ -14,12 +13,18 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+
+import java.util.Set;
 
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.getLocked;
 import static me.darkolythe.deepstorageplus.dsu.managers.SettingsManager.getLockedUsers;
 
 public class StorageBreakListener implements Listener {
+
+    /** DSU storage-container slots (column 8, rows 0-4). */
+    private static final Set<Integer> CONTAINER_SLOTS = Set.of(8, 17, 26, 35, 44);
 
     DeepStoragePlus main;
 
@@ -72,25 +77,57 @@ public class StorageBreakListener implements Listener {
     }
 
     /**
-     * Leert die Truhe beim Abbauen:
-     * - Nur echte User-Items (keine Plugin-Items) werden gedroppt
-     * - DSP-interne Items (Walls, Storage Containers, Lock, IO-Settings, etc.)
-     *   werden einfach entfernt und NICHT gedroppt
-     * - Der Storage Wrench bzw. Sorter Wrench wird NICHT als Drop gegeben,
-     *   weil der DSU/Sorter schon als 2x Chest droppt
+     * Empties a DSU chest on break.
+     *
+     * Container slots (8, 17, 26, 35, 44) hold DSU storage container ItemStacks
+     * whose ACTUAL contents are stored as PDC data on the item — NOT as separate
+     * inventory items. We must drain them via DSUManager and drop the real stored
+     * items, then drop the physical container block itself.
+     *
+     * All other plugin-internal items (walls, IO-settings, empty-block
+     * placeholders) are silently removed. Accidental user items are dropped.
      */
-    private static void emptyChest(Container chest) {
-        for (int i = 0; i < chest.getInventory().getContents().length; i++) {
-            ItemStack item = chest.getInventory().getItem(i);
-            if (item == null || item.getType() == org.bukkit.Material.AIR) continue;
+    private void emptyChest(Container chest) {
+        Inventory inv = chest.getInventory();
 
+        for (int containerSlot : CONTAINER_SLOTS) {
+            ItemStack containerItem = inv.getItem(containerSlot);
+            if (containerItem == null || containerItem.getType() == Material.AIR) continue;
+            if (!DSUManager.isStorageContainer(containerItem)) continue;
+
+            // Build a minimal snapshot inventory so takeItems can address slot 8
+            Inventory snapshot = Bukkit.createInventory(null, 54);
+            snapshot.setItem(8, containerItem.clone());
+
+            for (ItemStack template : DSUManager.getTotalTemplates(snapshot)) {
+                if (template == null || template.getType() == Material.AIR) continue;
+                int remaining = DSUManager.getTotalItemAmount(snapshot, template);
+                while (remaining > 0) {
+                    int batch = Math.min(remaining, template.getMaxStackSize());
+                    int taken = DSUManager.takeItems(template, snapshot, batch);
+                    if (taken <= 0) break;
+                    ItemStack drop = template.clone();
+                    drop.setAmount(taken);
+                    chest.getWorld().dropItemNaturally(chest.getLocation(), drop);
+                    remaining -= taken;
+                }
+            }
+
+            // Drop the physical storage container block
+            chest.getWorld().dropItemNaturally(chest.getLocation(), containerItem.clone());
+            inv.setItem(containerSlot, null);
+        }
+
+        // Clean up remaining slots
+        for (int i = 0; i < inv.getSize(); i++) {
+            if (CONTAINER_SLOTS.contains(i)) continue;
+            ItemStack item = inv.getItem(i);
+            if (item == null || item.getType() == Material.AIR) continue;
             if (ItemList.isPluginItem(item)) {
-                // DSP-internes Item: einfach loeschen, nicht droppen
-                chest.getInventory().setItem(i, null);
+                inv.setItem(i, null);
             } else {
-                // Echter User-Content: droppen
                 chest.getWorld().dropItemNaturally(chest.getLocation(), item);
-                chest.getInventory().setItem(i, null);
+                inv.setItem(i, null);
             }
         }
     }
