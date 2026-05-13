@@ -330,19 +330,15 @@ public class DSUManager {
         if (stored == null || incoming == null) return false;
         if (stored.getType() != incoming.getType()) return false;
 
-        // Beide ohne sichtbare Meta → match
+        boolean storedHasReal  = hasRelevantMeta(stored.getItemMeta());
+        boolean incomingHasReal = hasRelevantMeta(incoming.getItemMeta());
+
+        // Einer hat keine echte Meta → beide gelten als "plain vanilla" → match
+        if (!storedHasReal || !incomingHasReal) return true;
+
+        // Beide haben echte Meta → relevante Felder vergleichen
         ItemMeta sm = stored.getItemMeta();
         ItemMeta im = incoming.getItemMeta();
-
-        boolean storedHasReal = hasRelevantMeta(sm);
-        boolean incomingHasReal = hasRelevantMeta(im);
-
-        if (!storedHasReal && !incomingHasReal) return true;
-        if (storedHasReal != incomingHasReal) return false;
-
-        // Beide haben echte Meta → nur relevante Felder vergleichen
-        assert sm != null;
-        assert im != null;
         if (!Objects.equals(sm.hasDisplayName() ? sm.getDisplayName() : null,
                 im.hasDisplayName() ? im.getDisplayName() : null)) return false;
         if (!Objects.equals(sm.hasLore() ? sm.getLore() : null,
@@ -366,25 +362,21 @@ public class DSUManager {
         ItemMeta meta = container != null ? container.getItemMeta() : null;
         List<String> lore = meta != null ? meta.getLore() : null;
         int slots = getTypeSlotCount(lore);
-        ItemStack normalized = normalize(item);
 
-        DeepStoragePlus.getInstance().getLogger().info(
-                "[DSU MATCH DEBUG] findMatchingSlot: slots=" + slots
-                        + " item=" + normalized.getType()
-                        + " hasMeta=" + normalized.hasItemMeta()
-                        + " loreSize=" + (lore == null ? "null" : lore.size()));
-
+        // Nur Material + relevante Meta vergleichen — KEIN isSimilar()
         for (int i = 0; i < slots; i++) {
             ItemStack template = getStoredTemplate(container, i);
             int amt = getStoredAmount(container, i);
-            boolean similar = itemsMatch(template, normalized);
+            boolean match = itemsMatch(template, item);
+
             DeepStoragePlus.getInstance().getLogger().info(
                     "[DSU MATCH DEBUG]   slot=" + i
                             + " template=" + (template == null ? "null" : template.getType())
                             + " templateHasMeta=" + (template != null && template.hasItemMeta())
                             + " storedAmt=" + amt
-                            + " isSimilar=" + similar);
-            if (similar) return i;
+                            + " itemsMatch=" + match);
+
+            if (match) return i;
         }
         return -1;
     }
