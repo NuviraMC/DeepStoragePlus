@@ -144,8 +144,9 @@ public class IOListener implements Listener {
             if (slot == null || slot.getType() == Material.AIR) continue;
             if (ItemList.isPluginItem(slot)) continue;
 
+            log.info("[DSU-MERGE-KEY] slot=" + i + " type=" + slot.getType() + " amount=" + slot.getAmount() + " key=" + buildMergeKey(slot) + " hasMeta=" + slot.hasItemMeta());
+
             straySlots.add(i);
-            // Statt hashCode: normalize-basierter Key — nur relevante Felder
             String key = buildMergeKey(slot);
             if (merged.containsKey(key)) {
                 merged.get(key).setAmount(merged.get(key).getAmount() + slot.getAmount());
